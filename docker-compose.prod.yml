@@ -1,0 +1,97 @@
+# docker-compose.prod.yml — chạy trên EC2, PULL image từ ECR (không build tại chỗ)
+# Trước khi chạy: docker login vào ECR, rồi: docker compose -f docker-compose.prod.yml pull && up -d
+# Thay <ACCOUNT_ID> và <REGION> bằng giá trị của bạn (hoặc dùng biến ECR_REGISTRY trong .env)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_MULTIPLE_DATABASES: auth_db,product_db,order_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: 96m
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine    # bản không-management để nhẹ RAM
+    mem_limit: 192m
+    restart: unless-stopped
+
+  api-gateway:
+    image: ${ECR_REGISTRY}/api-gateway:${TAG:-latest}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      AUTH_GRPC_URL: auth-service:50051
+      PRODUCT_GRPC_URL: product-service:50052
+      ORDER_GRPC_URL: order-service:50053
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "80:3000"        # expose port 80 ra internet
+    mem_limit: 128m
+    restart: unless-stopped
+    depends_on: [auth-service, redis]
+
+  auth-service:
+    image: ${ECR_REGISTRY}/auth-service:${TAG:-latest}
+    environment:
+      NODE_ENV: production
+      GRPC_URL: 0.0.0.0:50051
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/auth_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 15m
+      REFRESH_EXPIRES_IN: 7d
+    mem_limit: 128m
+    restart: unless-stopped
+    depends_on: [postgres, redis]
+
+  product-service:
+    image: ${ECR_REGISTRY}/product-service:${TAG:-latest}
+    environment:
+      NODE_ENV: production
+      GRPC_URL: 0.0.0.0:50052
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/product_db
+    mem_limit: 128m
+    restart: unless-stopped
+    depends_on: [postgres]
+
+  order-service:
+    image: ${ECR_REGISTRY}/order-service:${TAG:-latest}
+    environment:
+      NODE_ENV: production
+      GRPC_URL: 0.0.0.0:50053
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/order_db
+      PRODUCT_GRPC_URL: product-service:50052
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    mem_limit: 128m
+    restart: unless-stopped
+    depends_on: [postgres, rabbitmq]
+
+  notification-worker:
+    image: ${ECR_REGISTRY}/notification-worker:${TAG:-latest}
+    environment:
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      AWS_REGION: ${AWS_REGION:-}
+      SES_FROM_EMAIL: ${SES_FROM_EMAIL:-}
+    mem_limit: 96m
+    restart: unless-stopped
+    depends_on: [rabbitmq]
+
+volumes:
+  pgdata:

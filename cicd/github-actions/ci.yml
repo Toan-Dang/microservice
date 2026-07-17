@@ -1,0 +1,79 @@
+# .github/workflows/ci.yml
+# CI: lint + test + build + push image lên ECR cho từng service thay đổi.
+# Đặt file này vào .github/workflows/ci.yml trong repo của bạn.
+
+name: CI - Build & Push to ECR
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: ap-southeast-1
+
+permissions:
+  id-token: write     # để dùng OIDC (không cần lưu access key)
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api-gateway, auth-service, product-service, order-service, notification-worker]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Install
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: services/${{ matrix.service }}
+        run: npm run lint --if-present
+
+      - name: Test
+        working-directory: services/${{ matrix.service }}
+        run: npm test --if-present
+
+      # ----- Chỉ push image khi merge vào main -----
+      - name: Configure AWS credentials (OIDC)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}   # IAM role cho GitHub OIDC
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          docker build \
+            -f services/$SERVICE/Dockerfile \
+            --target production \
+            --build-arg SERVICE_DIR=services/$SERVICE \
+            -t $REGISTRY/$SERVICE:${{ github.sha }} \
+            -t $REGISTRY/$SERVICE:latest .
+          docker push $REGISTRY/$SERVICE:${{ github.sha }}
+          docker push $REGISTRY/$SERVICE:latest
+
+  deploy:
+    needs: test-and-build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit

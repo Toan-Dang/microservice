@@ -1,0 +1,153 @@
+# docker-compose.yml — môi trường DEV local
+# Chạy: docker compose up -d --build
+# Gồm: 3 hạ tầng (postgres/redis/rabbitmq) + 5 service NestJS
+
+services:
+  # ---------- HẠ TẦNG ----------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      # tạo sẵn nhiều DB (database-per-service) qua script init
+      POSTGRES_MULTIPLE_DATABASES: auth_db,product_db,order_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # UI quản trị: http://localhost:15672 (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------- SERVICES ----------
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+      target: dev
+    command: npm run start:dev
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      AUTH_GRPC_URL: auth-service:50051
+      PRODUCT_GRPC_URL: product-service:50052
+      ORDER_GRPC_URL: order-service:50053
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./services/api-gateway:/app/services/api-gateway
+      - ./proto:/app/proto
+    depends_on:
+      auth-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+      target: dev
+    command: npm run start:dev
+    environment:
+      NODE_ENV: development
+      GRPC_URL: 0.0.0.0:50051
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-secret}@postgres:5432/auth_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_EXPIRES_IN: 15m
+      REFRESH_EXPIRES_IN: 7d
+    volumes:
+      - ./services/auth-service:/app/services/auth-service
+      - ./proto:/app/proto
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+      target: dev
+    command: npm run start:dev
+    environment:
+      NODE_ENV: development
+      GRPC_URL: 0.0.0.0:50052
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-secret}@postgres:5432/product_db
+    volumes:
+      - ./services/product-service:/app/services/product-service
+      - ./proto:/app/proto
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+      target: dev
+    command: npm run start:dev
+    environment:
+      NODE_ENV: development
+      GRPC_URL: 0.0.0.0:50053
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-secret}@postgres:5432/order_db
+      PRODUCT_GRPC_URL: product-service:50052
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    volumes:
+      - ./services/order-service:/app/services/order-service
+      - ./proto:/app/proto
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  notification-worker:
+    build:
+      context: .
+      dockerfile: services/notification-worker/Dockerfile
+      target: dev
+    command: npm run start:dev
+    environment:
+      NODE_ENV: development
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      # Để mock email, để trống SES. Điền khi muốn gửi thật.
+      AWS_REGION: ${AWS_REGION:-}
+      SES_FROM_EMAIL: ${SES_FROM_EMAIL:-}
+    volumes:
+      - ./services/notification-worker:/app/services/notification-worker
+      - ./proto:/app/proto
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  pgdata:

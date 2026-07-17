@@ -1,0 +1,10 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Ép LF cho các file chạy trên Linux / mount vào container.
+# Tránh lỗi CRLF khi làm việc trên Windows (script không chạy được trong container/EC2).
+*.sh    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Dockerfile text eol=lf
+*.proto text eol=lf

@@ -1,0 +1,51 @@
+# buildspec.yml — dùng bởi AWS CodeBuild (route CI/CD trên AWS).
+# Đặt ở gốc repo. CodeBuild build cả 5 image, push lên ECR, xuất artifact cho CodeDeploy.
+
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: ap-southeast-1
+  # ACCOUNT_ID và ECR_REGISTRY nên set trong project CodeBuild (Environment variables)
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_REGISTRY=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+      - TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+
+  build:
+    commands:
+      - echo Building all services...
+      - |
+        for SERVICE in api-gateway auth-service product-service order-service notification-worker; do
+          echo "==> $SERVICE"
+          docker build \
+            -f services/$SERVICE/Dockerfile \
+            --target production \
+            --build-arg SERVICE_DIR=services/$SERVICE \
+            -t $ECR_REGISTRY/$SERVICE:$TAG \
+            -t $ECR_REGISTRY/$SERVICE:latest .
+          docker push $ECR_REGISTRY/$SERVICE:$TAG
+          docker push $ECR_REGISTRY/$SERVICE:latest
+        done
+
+  post_build:
+    commands:
+      - echo Preparing deploy artifacts...
+      # ghi ECR_REGISTRY vào file .env để CodeDeploy dùng
+      - echo "ECR_REGISTRY=$ECR_REGISTRY" > deploy.env
+      - echo "TAG=latest" >> deploy.env
+
+# artifact được đẩy tới CodeDeploy: gồm appspec, compose prod, scripts, deploy.env
+artifacts:
+  files:
+    - cicd/aws/appspec.yml
+    - docker-compose.prod.yml
+    - infra/init-multiple-dbs.sh
+    - cicd/aws/scripts/**/*
+    - deploy.env
+  discard-paths: no

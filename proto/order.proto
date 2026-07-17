@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package order;
+
+// Service đơn hàng — api-gateway gọi CreateOrder (sync).
+// Sau khi tạo, order-service PUBLISH event "order.created" lên RabbitMQ (async) — không nằm trong proto này.
+service OrderService {
+  rpc CreateOrder (CreateOrderRequest) returns (Order);
+  rpc FindOne (FindOneRequest) returns (Order);
+  rpc FindByUser (FindByUserRequest) returns (OrderList);
+}
+
+message OrderItem {
+  string product_id = 1;
+  int32 quantity = 2;
+  double price = 3;
+}
+
+message CreateOrderRequest {
+  string user_id = 1;
+  repeated OrderItemInput items = 2;
+}
+
+message OrderItemInput {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message Order {
+  string id = 1;
+  string user_id = 2;
+  repeated OrderItem items = 3;
+  double total = 4;
+  string status = 5; // PENDING | CONFIRMED | PAID | CANCELLED
+  string created_at = 6;
+}
+
+message FindOneRequest {
+  string id = 1;
+}
+
+message FindByUserRequest {
+  string user_id = 1;
+}
+
+message OrderList {
+  repeated Order orders = 1;
+}
