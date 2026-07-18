@@ -62,6 +62,7 @@ services:
       - "3000:3000"
     volumes:
       - ./services/api-gateway:/app/services/api-gateway
+      - /app/services/api-gateway/node_modules
       - ./proto:/app/proto
     depends_on:
       auth-service:
@@ -85,6 +86,7 @@ services:
       REFRESH_EXPIRES_IN: 7d
     volumes:
       - ./services/auth-service:/app/services/auth-service
+      - /app/services/auth-service/node_modules
       - ./proto:/app/proto
     depends_on:
       postgres:
