@@ -14,7 +14,7 @@
 ## DAY 1 — Nền móng
 
 ```
-Đọc CLAUDE.md và proto/. Tạo cấu trúc monorepo dùng pnpm workspaces (hoặc npm workspaces nếu đơn giản hơn).
+Đọc CLAUDE.md và proto/. Tạo cấu trúc monorepo dùng npm workspaces.
 Scaffold 2 service NestJS: services/api-gateway và services/auth-service.
 
 - api-gateway: NestJS HTTP app, port 3000, có endpoint GET /health trả {status:'ok'}.
