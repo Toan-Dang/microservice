@@ -5,6 +5,7 @@ import { getProtoPath } from '../common/proto-path.util';
 import { AuthController } from './auth.controller';
 import { AUTH_CLIENT, AUTH_PACKAGE_NAME } from './auth-client.constants';
 import { AuthClientService } from './auth-client.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { AuthClientService } from './auth-client.service';
     ]),
   ],
   controllers: [AuthController],
-  providers: [AuthClientService],
+  providers: [AuthClientService, JwtAuthGuard],
+  exports: [AuthClientService, JwtAuthGuard],
 })
 export class AuthClientModule {}
