@@ -67,6 +67,8 @@ services:
     depends_on:
       auth-service:
         condition: service_started
+      product-service:
+        condition: service_started
       redis:
         condition: service_healthy
 
@@ -106,6 +108,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-secret}@postgres:5432/product_db
     volumes:
       - ./services/product-service:/app/services/product-service
+      - /app/services/product-service/node_modules
       - ./proto:/app/proto
     depends_on:
       postgres:
