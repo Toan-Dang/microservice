@@ -1,9 +1,12 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { ClientGrpc } from '@nestjs/microservices';
+import { firstValueFrom } from 'rxjs';
 import {
   AUTH_CLIENT,
   AUTH_SERVICE_NAME,
   AuthGrpcService,
+  AuthResponse,
+  ValidateTokenResponse,
 } from './auth-client.constants';
 
 @Injectable()
@@ -17,7 +20,19 @@ export class AuthClientService implements OnModuleInit {
       this.client.getService<AuthGrpcService>(AUTH_SERVICE_NAME);
   }
 
-  ping() {
-    return this.authService.validateToken({ accessToken: 'ping' });
+  register(email: string, password: string): Promise<AuthResponse> {
+    return firstValueFrom(this.authService.register({ email, password }));
+  }
+
+  login(email: string, password: string): Promise<AuthResponse> {
+    return firstValueFrom(this.authService.login({ email, password }));
+  }
+
+  refresh(refreshToken: string): Promise<AuthResponse> {
+    return firstValueFrom(this.authService.refreshToken({ refreshToken }));
+  }
+
+  validateToken(accessToken: string): Promise<ValidateTokenResponse> {
+    return firstValueFrom(this.authService.validateToken({ accessToken }));
   }
 }
