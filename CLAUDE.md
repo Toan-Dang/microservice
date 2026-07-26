@@ -10,6 +10,7 @@ E-commerce microservices để học. Monorepo, mỗi service là 1 ứng dụng
 - **Sync = gRPC**: api-gateway ↔ các service, và order-service → product-service dùng gRPC. Proto ở `proto/`.
 - **Async = RabbitMQ**: order-service **publish** event; notification-worker **consume**. Không gọi trực tiếp.
 - **api-gateway** là nơi DUY NHẤT nhận REST từ client và xử lý JWT guard.
+- **api-gateway** áp `ThrottlerGuard` (`@nestjs/throttler`) **global** qua `APP_GUARD` — chống bot/script quét spam các route public (không JWT) như `GET /products`. Cấu hình qua env `THROTTLE_TTL_MS` / `THROTTLE_LIMIT` (mặc định 20 request/10s/IP). Route hạ tầng (vd `/health`) đánh dấu `@SkipThrottle()`. Đây là rate-limit theo IP, KHÔNG phải cơ chế xác thực — không thay thế JWT guard cho route cần biết danh tính user.
 - Không service nào expose REST ra ngoài trừ api-gateway.
 
 ## Tech & convention
