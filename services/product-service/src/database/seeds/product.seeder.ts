@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { Product } from '../../product/product.entity';
+import { Product } from '../../entities/product.entity';
 import { Seeder } from './seeder.interface';
 
 /**

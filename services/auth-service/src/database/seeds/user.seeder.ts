@@ -1,6 +1,6 @@
 import * as bcrypt from 'bcrypt';
 import { DataSource } from 'typeorm';
-import { User } from '../../auth/user.entity';
+import { User } from '../../entities/user.entity';
 import { Seeder } from './seeder.interface';
 
 // Giữ khớp AuthService.SALT_ROUNDS để hash seed đọc được như user đăng ký thường.

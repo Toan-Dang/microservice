@@ -1,6 +1,6 @@
 import { DataSource } from 'typeorm';
-import { User } from '../../auth/user.entity';
-import { UserSeeder } from './user.seeder';
+import { User } from '../../../../src/entities/user.entity';
+import { UserSeeder } from '../../../../src/database/seeds/user.seeder';
 
 /** DataSource giả lập: chỉ cần getRepository(User) trả repo in-memory. */
 function createDataSourceMock(existing: Partial<User>[] = []) {

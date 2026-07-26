@@ -30,6 +30,10 @@
 services/product-service/
 ├── Dockerfile, package.json, tsconfig*, nest-cli.json,   # copy từ auth-service,
 │   eslint.config.mjs, .prettierrc                         # đổi tên + bỏ dep jwt/bcrypt/redis
+├── test/                             # TOÀN BỘ test, không nằm trong src/
+│   └── unit/                         # mirror đúng cấu trúc src/
+│       ├── product/product.service.spec.ts        # unit test CheckStock + findMany
+│       └── database/seeds/product.seeder.spec.ts  # unit test tính idempotent
 └── src/
     ├── main.ts                        # bootstrap gRPC, package 'product', cổng 50052
     ├── app.module.ts                  # wire TypeORM (product_db) + SeedModule — KHÔNG có Jwt/Redis
@@ -37,10 +41,11 @@ services/product-service/
     ├── product/
     │   ├── product.controller.ts      # 4 @GrpcMethod khớp proto/product.proto
     │   ├── product.service.ts         # ⭐ logic: create/findOne/findMany/checkStock
+    │   └── product.interface.ts       # type khớp proto (giống auth.interface.ts)
+    ├── entities/                      # domain model, gom 1 chỗ
     │   ├── product.entity.ts          # entity TypeORM = bảng "products"
-    │   ├── product.interface.ts       # type khớp proto (giống auth.interface.ts)
-    │   └── product.service.spec.ts    # unit test CheckStock
-    └── database/                      # mọi thứ liên quan DB gom về đây
+    │   └── index.ts                   # ENTITIES = [Product] — nguồn duy nhất
+    └── database/                      # HẠ TẦNG DB (không chứa entity)
         ├── data-source.ts             # cho TypeORM CLI + npm run seed
         ├── migrations/
         │   └── <timestamp>-InitProduct.ts  # SQL tạo bảng products
@@ -49,8 +54,7 @@ services/product-service/
             ├── product.seeder.ts      # 5 sản phẩm mẫu, idempotent theo name
             ├── index.ts               # SEEDERS + runSeeders()
             ├── seed.module.ts         # chạy seed khi boot nếu SEED_ON_BOOT=true
-            ├── run-seed.ts            # entry cho `npm run seed`
-            └── product.seeder.spec.ts # unit test tính idempotent
+            └── run-seed.ts            # entry cho `npm run seed`
 ```
 
 > `auth-service` cũng được dựng **y hệt** structure này (`database/{data-source.ts,migrations,seeds}`), với `user.seeder.ts` seed 1 user dev — nên 2 service đọc giống nhau hoàn toàn.
@@ -188,11 +192,11 @@ services/api-gateway/src/
 ## 4. Thứ tự đọc file để hiểu Day 3 (đề xuất)
 
 1. `proto/product.proto` — hợp đồng: 4 rpc + message. Chú ý `product_id` (snake_case).
-2. `product-service/src/product/product.entity.ts` — bảng `products` (dễ nhất).
+2. `product-service/src/entities/product.entity.ts` — bảng `products` (dễ nhất).
 3. `product-service/src/product/product.service.ts` — **đọc kỹ nhất**: 4 method (thuần business logic, không có seed).
 4. `product-service/src/app.module.ts` — wire TypeORM (so với Day 2: **thiếu** Jwt & Redis).
 5. `product-service/src/database/seeds/` — `seeder.interface.ts` → `product.seeder.ts` → `index.ts` → `seed.module.ts`.
-6. `product-service/src/product/product.service.spec.ts` — cách test CheckStock bằng repo giả.
+6. `product-service/test/unit/product/product.service.spec.ts` — cách test CheckStock bằng repo giả.
 7. `api-gateway/src/product-client/dto/product.dto.ts` — luật validate input.
 8. `api-gateway/src/product-client/product.controller.ts` — REST + chỗ gắn `@UseGuards`.
 9. `api-gateway/src/product-client/product-client.module.ts` — cách **import AuthClientModule** để mượn guard.
@@ -206,13 +210,15 @@ Gần **giống hệt** auth-service, nhưng **đơn giản hơn** vì product k
 ```ts
 imports: [
   ConfigModule.forRoot({ isGlobal: true }),      // đọc env DATABASE_URL, GRPC_URL
-  TypeOrmModule.forRootAsync({ ...product_db }),  // kết nối product_db, migrationsRun:true, synchronize:false
+  TypeOrmModule.forRootAsync({ ...product_db }),  // entities: ENTITIES (barrel), migrationsRun:true, synchronize:false
   TypeOrmModule.forFeature([Product]),            // để inject Repository<Product>
   SeedModule,                                     // seed dữ liệu mẫu (chỉ khi SEED_ON_BOOT=true)
 ],
 controllers: [ProductController],
 providers: [ProductService],
 ```
+
+> Để ý `entities: ENTITIES` lấy từ `src/entities/index.ts`, còn `forFeature([Product])` khai từng entity cụ thể. Hai cái **khác mục đích**: `entities` nói cho connection biết phải load metadata của những class nào; `forFeature` nói module này được `@InjectRepository` những repo nào. Nhờ barrel `ENTITIES`, thêm entity mới chỉ sửa 1 chỗ thay vì cả `app.module.ts` và `database/data-source.ts`.
 
 **Khác Day 2 ở đâu:**
 - ❌ **Không** `JwtModule` — product-service không phát/verify token.
@@ -275,6 +281,22 @@ export class SeedModule implements OnApplicationBootstrap {
 ### 6.2. Phân trang với `findAndCount`
 `findAndCount` trả 1 lượt cả `[danh_sách, tổng_số]` → đủ cho client biết có bao nhiêu trang. `skip = (page-1)*limit`, `take = limit`. Có **clamp** `limit ≤ 100` để 1 client không thể xin 1 triệu bản ghi làm sập DB.
 
+**Bẫy quan trọng — ORDER BY phải TẤT ĐỊNH:**
+```ts
+order: { createdAt: 'ASC', id: 'ASC' }   // `id` là tie-breaker, KHÔNG được thiếu
+```
+Ban đầu chỉ có `createdAt: 'ASC'`. Vấn đề: 5 sản phẩm seed được insert **cùng một batch `save()`** nên TypeORM ghi **cùng một `created_at`**:
+```
+ Bàn phím cơ        | 2026-07-25 17:18:51.753677
+ Chuột không dây    | 2026-07-25 17:18:51.753677
+ Tai nghe Bluetooth | 2026-07-25 17:18:51.753677   ← 5 dòng trùng khít
+```
+SQL **không đảm bảo** thứ tự giữa các dòng có giá trị sort bằng nhau — Postgres được tự do trả theo thứ tự nào cũng đúng chuẩn, và thứ tự đó có thể đổi theo query plan. Hệ quả với phân trang: `LIMIT/OFFSET` cắt trên một danh sách không ổn định → **page 2 có thể trả lại bản ghi đã thấy ở page 1, và bỏ sót bản ghi khác luôn**. Bug này rất khó thấy khi test tay vì đa số lần chạy vẫn ra đúng.
+
+Cách sửa: thêm một cột **unique** vào cuối `ORDER BY` (ở đây là `id`). Khi đó không còn hai dòng nào "bằng nhau" nữa → thứ tự trở nên tất định. Đây là luật chung: **bất kỳ query có phân trang đều phải sort trên một tổ hợp cột unique.**
+
+> Lưu ý phụ: sau khi sửa, 5 sản phẩm seed hiển thị theo thứ tự trông "ngẫu nhiên" — vì trong nhóm trùng `created_at`, thứ tự do `id` (UUID) quyết định. Nó **ổn định** (gọi bao nhiêu lần cũng vậy), chỉ không khớp thứ tự khai trong `SEED_PRODUCTS`. Muốn khớp thì phải cho mỗi bản ghi seed một `created_at` khác nhau — nhưng vẫn **không được bỏ** tie-breaker, vì user tạo sản phẩm thật cũng có thể trùng timestamp.
+
 ### 6.3. `price` kiểu `double precision`
 Proto khai `double price`. Trong entity dùng `@Column({ type: 'double precision' })` để TypeORM trả về **number** JS (nếu dùng `decimal`/`numeric` TypeORM trả **string**, phải parse thêm). Đủ cho dự án học; tiền thật production nên dùng số nguyên (đơn vị "đồng/xu") để tránh sai số dấu phẩy động.
 
@@ -315,7 +337,7 @@ CheckStock(product_id, quantity) → { available, price, remaining }
 **Mới ở Day 3:**
 - Service thứ 2 với **DB tách hẳn** (`product_db`) — chứng minh database-per-service.
 - 1 request `POST /products` chạm **3 process** (gateway → auth → product) nhờ **tái dùng** guard.
-- Tầng `src/database/` (data-source + migrations + seeds) và **seed tách khỏi service**, bật/tắt bằng `SEED_ON_BOOT`.
+- Tách rõ **hạ tầng** (`src/database/`: data-source + migrations + seeds) khỏi **domain model** (`src/entities/` + barrel `ENTITIES`), và **seed tách khỏi service**, bật/tắt bằng `SEED_ON_BOOT`.
 - **Phân trang** (`findAndCount` + clamp) và kiểu `double precision`.
 - Method `CheckStock` **chỉ gRPC, không REST** → kiểm bằng **unit test**.
 
@@ -328,5 +350,5 @@ CheckStock(product_id, quantity) → { available, price, remaining }
 3. `docker compose restart product-service` rồi xem log: lần 2 in `seed "products": thêm 0, bỏ qua 5` — chứng minh seed idempotent. Chạy `docker compose exec product-service npm run seed` cũng ra đúng như vậy.
 3b. Xoá 1 sản phẩm seed bằng `psql ... -c "DELETE FROM products WHERE name='Bàn phím cơ'"` rồi `npm run seed` lại → in `thêm 1, bỏ qua 4`. Đây là điểm khác so với kiểu "chỉ seed khi bảng rỗng".
 4. Gọi `POST /products` **không** token → 401; **sai** token → 401; body `price: -5` → 400. Đối chiếu xem lỗi nào do guard, lỗi nào do ValidationPipe.
-5. Chạy `npm test` trong `services/product-service` và mở `product.service.spec.ts`: xem cách test dùng **repo giả bằng Map** (không cần DB thật) để kiểm logic `CheckStock` — kỹ thuật test service tách khỏi hạ tầng.
+5. Chạy `npm test` trong `services/product-service` và mở `test/unit/product/product.service.spec.ts`: xem cách test dùng **repo giả bằng Map** (không cần DB thật) để kiểm logic `CheckStock` — kỹ thuật test service tách khỏi hạ tầng.
 6. (Chuẩn bị Day 4) Đọc `proto/order.proto` và để ý order-service sẽ gọi `CheckStock` — hình dung nó ghép vào flow `CreateOrder` thế nào.

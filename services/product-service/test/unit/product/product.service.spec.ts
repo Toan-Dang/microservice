@@ -1,7 +1,7 @@
 import { RpcException } from '@nestjs/microservices';
 import { Repository } from 'typeorm';
-import { ProductService } from './product.service';
-import { Product } from './product.entity';
+import { ProductService } from '../../../src/product/product.service';
+import { Product } from '../../../src/entities/product.entity';
 
 /** Repo Product giả lập bằng Map trong bộ nhớ — đủ cho unit test logic. */
 function createProductRepoMock(seed: Product[] = []): Repository<Product> {
@@ -37,6 +37,40 @@ function makeProduct(over: Partial<Product> = {}): Product {
     ...over,
   } as Product;
 }
+
+describe('ProductService.findMany', () => {
+  /** Lấy object option đã truyền vào findAndCount để kiểm tra query dựng đúng. */
+  function optionsOf(repo: Repository<Product>): Record<string, unknown> {
+    const mock = repo.findAndCount as unknown as jest.Mock;
+    return mock.mock.calls[0][0] as Record<string, unknown>;
+  }
+
+  it('sort có tie-breaker `id` để phân trang tất định khi createdAt trùng nhau', async () => {
+    const repo = createProductRepoMock([makeProduct({ id: 'p1' })]);
+
+    await new ProductService(repo).findMany(1, 10);
+
+    // Chỉ `createdAt` là KHÔNG đủ: các bản ghi seed insert cùng batch có cùng
+    // timestamp, Postgres không đảm bảo thứ tự → page có thể trùng/bỏ sót.
+    expect(optionsOf(repo).order).toEqual({ createdAt: 'ASC', id: 'ASC' });
+  });
+
+  it('skip/take tính đúng theo page và limit', async () => {
+    const repo = createProductRepoMock([]);
+
+    await new ProductService(repo).findMany(3, 20);
+
+    expect(optionsOf(repo)).toMatchObject({ skip: 40, take: 20 });
+  });
+
+  it('mặc định page=1 và clamp limit về tối đa 100', async () => {
+    const repo = createProductRepoMock([]);
+
+    await new ProductService(repo).findMany(undefined, 5000);
+
+    expect(optionsOf(repo)).toMatchObject({ skip: 0, take: 100 });
+  });
+});
 
 describe('ProductService.checkStock', () => {
   it('available=true khi tồn kho >= quantity, trả đúng price và remaining', async () => {

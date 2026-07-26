@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { join } from 'path';
 import { DataSource } from 'typeorm';
-import { Product } from '../product/product.entity';
+import { ENTITIES } from '../entities';
 
 /**
  * DataSource riêng cho TypeORM CLI (migration:generate / run / revert) và cho
@@ -12,6 +12,6 @@ import { Product } from '../product/product.entity';
 export default new DataSource({
   type: 'postgres',
   url: process.env.DATABASE_URL,
-  entities: [Product],
+  entities: ENTITIES,
   migrations: [join(__dirname, 'migrations', '*.{js,ts}')],
 });

@@ -9,7 +9,7 @@ import {
   ProductList,
   ProductMessage,
 } from './product.interface';
-import { Product } from './product.entity';
+import { Product } from '../entities/product.entity';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
@@ -66,7 +66,12 @@ export class ProductService {
     const safeLimit = Math.min(rawLimit, MAX_LIMIT);
 
     const [items, total] = await this.products.findAndCount({
-      order: { createdAt: 'ASC' },
+      // `id` là tie-breaker BẮT BUỘC: nhiều sản phẩm có thể trùng `createdAt`
+      // (vd 5 bản ghi seed insert cùng 1 batch → cùng timestamp). Khi giá trị
+      // sort trùng nhau, Postgres KHÔNG đảm bảo thứ tự, nên phân trang có thể
+      // trả trùng hoặc bỏ sót bản ghi giữa các page. Thêm 1 cột unique vào
+      // ORDER BY làm thứ tự trở nên tất định.
+      order: { createdAt: 'ASC', id: 'ASC' },
       skip: (safePage - 1) * safeLimit,
       take: safeLimit,
     });

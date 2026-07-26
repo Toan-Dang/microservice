@@ -17,6 +17,7 @@ E-commerce microservices để học. Monorepo, mỗi service là 1 ứng dụng
 - ORM: TypeORM (hoặc Prisma — chọn 1 và giữ nhất quán). Migration bật sẵn.
 - Config qua `@nestjs/config`, đọc từ biến môi trường (xem docker-compose).
 - Validation bằng `class-validator` ở DTO của api-gateway.
+- Mọi query có **phân trang** phải sort trên tổ hợp cột **unique** (vd `order: { createdAt: 'ASC', id: 'ASC' }`). Thiếu tie-breaker thì các dòng trùng giá trị sort có thứ tự không xác định → page trả trùng/bỏ sót bản ghi.
 - Mỗi service có: `Dockerfile` (copy từ mẫu, đổi `SERVICE_DIR`), `package.json` với script `start:dev`, `build`, `test`, `lint`.
 - Test bằng Jest. Mỗi service có ít nhất vài unit test cho business logic.
 
@@ -26,16 +27,37 @@ services/<name>/
 ├── src/
 │   ├── main.ts          # bootstrap microservice (gRPC listen hoặc RMQ consumer)
 │   ├── app.module.ts
-│   ├── database/        # mọi thứ tầng DB gom về đây
+│   ├── database/        # HẠ TẦNG DB (không chứa entity)
 │   │   ├── data-source.ts       # DataSource cho TypeORM CLI + npm run seed
 │   │   ├── migrations/          # chỉ thay đổi SCHEMA
 │   │   └── seeds/               # dữ liệu mẫu (xem mục Seed bên dưới)
-│   └── <feature>/       # controller (gRPC handler) + service + entity + dto
-├── test/
+│   ├── entities/        # DOMAIN MODEL, gom 1 chỗ (xem mục Entity bên dưới)
+│   │   ├── <name>.entity.ts
+│   │   └── index.ts             # export ENTITIES = [...] + re-export từng entity
+│   └── <feature>/       # controller (gRPC handler) + service + dto
+├── test/                # TOÀN BỘ test ở đây, KHÔNG để *.spec.ts trong src/
+│   ├── unit/            # mirror đúng cấu trúc src/
+│   └── e2e/             # chỉ service nào có e2e (hiện tại: api-gateway)
 ├── package.json
 ├── tsconfig.json
 └── Dockerfile
 ```
+
+## Test (BẮT BUỘC)
+- Không đặt `*.spec.ts` trong `src/`. Unit test ở `test/unit/`, **mirror đúng đường dẫn** trong `src/` (vd `src/product/product.service.ts` → `test/unit/product/product.service.spec.ts`).
+- E2E ở `test/e2e/`, đặt tên `*.e2e-spec.ts`, chạy bằng config riêng `test/jest-e2e.json`.
+- Jest config trong `package.json` phải là: `rootDir: "."`, `testRegex: "test/unit/.*\\.spec\\.ts$"`, `collectCoverageFrom: ["src/**/*.(t|j)s"]`, `coverageDirectory: "./coverage"`.
+- **Lý do `testRegex` phải trỏ thẳng `test/unit/`:** pattern `.*\.spec\.ts$` cũng khớp `*.e2e-spec.ts`, nên nếu để chung thì `npm test` sẽ chạy luôn e2e.
+
+## Entity (BẮT BUỘC)
+- Entity nằm ở `src/entities/`, **KHÔNG** để trong feature folder và **KHÔNG** để trong `src/database/` (`database/` chỉ chứa hạ tầng: connection, migration, seed).
+- `src/entities/index.ts` là **nguồn duy nhất** khai danh sách entity:
+  ```ts
+  export const ENTITIES = [Product, /* thêm entity mới ở đây */];
+  ```
+  `app.module.ts` (`entities: ENTITIES`) và `database/data-source.ts` (`entities: ENTITIES`) đều dùng barrel này — thêm entity chỉ sửa 1 chỗ.
+- Riêng `TypeOrmModule.forFeature([...])` vẫn khai **từng entity cụ thể**, vì nó có nghĩa khác: "module này được inject Repository nào", không phải "connection load entity nào".
+- Chiều phụ thuộc cho phép: `database/seeds/*` → `entities/*` (hạ tầng phụ thuộc domain). KHÔNG được ngược lại — entity không import gì từ `database/`.
 
 ## Seed dữ liệu (BẮT BUỘC theo pattern này)
 - Seed **KHÔNG** nằm trong `<feature>.service.ts` (service chỉ chứa business logic) và **KHÔNG** viết thành migration (migration chỉ dành cho schema, chạy cả trên prod).

@@ -1,6 +1,6 @@
 import { DataSource } from 'typeorm';
-import { Product } from '../../product/product.entity';
-import { ProductSeeder } from './product.seeder';
+import { Product } from '../../../../src/entities/product.entity';
+import { ProductSeeder } from '../../../../src/database/seeds/product.seeder';
 
 /** DataSource giả lập: chỉ cần getRepository(Product) trả repo in-memory. */
 function createDataSourceMock(existing: Partial<Product>[] = []) {
