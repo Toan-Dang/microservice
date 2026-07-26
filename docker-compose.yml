@@ -67,6 +67,8 @@ services:
     depends_on:
       auth-service:
         condition: service_started
+      product-service:
+        condition: service_started
       redis:
         condition: service_healthy
 
@@ -84,6 +86,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       JWT_EXPIRES_IN: 15m
       REFRESH_EXPIRES_IN: 7d
+      # Seed user dev khi boot (chỉ dev — prod không set biến này).
+      SEED_ON_BOOT: "true"
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin12345}
     volumes:
       - ./services/auth-service:/app/services/auth-service
       - /app/services/auth-service/node_modules
@@ -104,8 +110,11 @@ services:
       NODE_ENV: development
       GRPC_URL: 0.0.0.0:50052
       DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-secret}@postgres:5432/product_db
+      # Seed 5 sản phẩm mẫu khi boot (chỉ dev — prod không set biến này).
+      SEED_ON_BOOT: "true"
     volumes:
       - ./services/product-service:/app/services/product-service
+      - /app/services/product-service/node_modules
       - ./proto:/app/proto
     depends_on:
       postgres:

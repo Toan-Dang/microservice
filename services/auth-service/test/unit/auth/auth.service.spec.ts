@@ -3,9 +3,9 @@ import { JwtService } from '@nestjs/jwt';
 import { RpcException } from '@nestjs/microservices';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
-import { RedisService } from '../redis/redis.service';
-import { AuthService } from './auth.service';
-import { User } from './user.entity';
+import { RedisService } from '../../../src/redis/redis.service';
+import { AuthService } from '../../../src/auth/auth.service';
+import { User } from '../../../src/entities/user.entity';
 
 const JWT_SECRET = 'test-secret';
 

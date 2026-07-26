@@ -14,10 +14,12 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "migration:generate": "typeorm-ts-node-commonjs -d src/data-source.ts migration:generate",
-    "migration:run": "typeorm-ts-node-commonjs -d src/data-source.ts migration:run",
-    "migration:revert": "typeorm-ts-node-commonjs -d src/data-source.ts migration:revert",
-    "migration:show": "typeorm-ts-node-commonjs -d src/data-source.ts migration:show"
+    "migration:generate": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:generate",
+    "migration:run": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:run",
+    "migration:revert": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:revert",
+    "migration:show": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:show",
+    "seed": "ts-node -r tsconfig-paths/register src/database/seeds/run-seed.ts",
+    "seed:prod": "node dist/database/seeds/run-seed.js"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.4",
@@ -62,15 +64,15 @@
       "json",
       "ts"
     ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
+    "rootDir": ".",
+    "testRegex": "test/unit/.*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "src/**/*.(t|j)s"
     ],
-    "coverageDirectory": "../coverage",
+    "coverageDirectory": "./coverage",
     "testEnvironment": "node"
   }
 }

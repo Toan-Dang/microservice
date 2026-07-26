@@ -1,6 +1,6 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { AuthClientService } from './auth-client.service';
-import { JwtAuthGuard } from './jwt-auth.guard';
+import { AuthClientService } from '../../../src/auth-client/auth-client.service';
+import { JwtAuthGuard } from '../../../src/auth-client/jwt-auth.guard';
 
 function contextWith(headers: Record<string, string>): {
   ctx: ExecutionContext;

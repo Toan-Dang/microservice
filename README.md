@@ -120,7 +120,7 @@ Mỗi ngày ~3-5 giờ. Cột "Prompt" trỏ tới bộ prompt sẵn trong `PROM
 - [ ] `product-service`: CRUD product + endpoint `checkStock`.
 - [ ] `product.proto`, kết nối `product_db`.
 - [ ] api-gateway expose `/products` REST → gọi product-service gRPC.
-- [ ] Seed vài sản phẩm mẫu.
+- [ ] Seed vài sản phẩm mẫu — đặt ở `src/database/seeds/`, tự chạy khi boot nếu `SEED_ON_BOOT=true` (compose dev đã bật), hoặc chạy tay `docker compose exec product-service npm run seed`.
 - **Mục tiêu:** CRUD sản phẩm qua gateway hoạt động.
 - **Prompt:** `PROMPTS.md` → Day 3
 

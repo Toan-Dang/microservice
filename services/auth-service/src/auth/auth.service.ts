@@ -10,7 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 import { RedisService } from '../redis/redis.service';
 import { AuthResponse, ValidateTokenResponse } from './auth.interface';
-import { User } from './user.entity';
+import { User } from '../entities/user.entity';
 
 interface JwtPayload {
   sub: string;
