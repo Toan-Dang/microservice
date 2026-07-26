@@ -1,5 +1,5 @@
 import { status } from '@grpc/grpc-js';
-import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,35 +15,12 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
 
-// 5 sản phẩm mẫu seed khi bảng rỗng.
-const SEED_PRODUCTS: CreateProductRequest[] = [
-  { name: 'Bàn phím cơ', price: 990000, stock: 50 },
-  { name: 'Chuột không dây', price: 450000, stock: 120 },
-  { name: 'Tai nghe Bluetooth', price: 1290000, stock: 30 },
-  { name: 'Màn hình 27 inch', price: 4590000, stock: 15 },
-  { name: 'Ổ cứng SSD 1TB', price: 1890000, stock: 0 },
-];
-
 @Injectable()
-export class ProductService implements OnApplicationBootstrap {
-  private readonly logger = new Logger(ProductService.name);
-
+export class ProductService {
   constructor(
     @InjectRepository(Product)
     private readonly products: Repository<Product>,
   ) {}
-
-  /** Seed dữ liệu mẫu khi khởi động nếu bảng products đang rỗng. */
-  async onApplicationBootstrap(): Promise<void> {
-    const count = await this.products.count();
-    if (count > 0) {
-      return;
-    }
-    await this.products.save(
-      SEED_PRODUCTS.map((p) => this.products.create(p)),
-    );
-    this.logger.log(`Đã seed ${SEED_PRODUCTS.length} sản phẩm mẫu`);
-  }
 
   async create(data: CreateProductRequest): Promise<ProductMessage> {
     const name = (data.name ?? '').trim();

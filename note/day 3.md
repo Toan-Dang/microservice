@@ -14,7 +14,7 @@
 | Entity | `User` | `Product` (id, name, price, stock) |
 | gRPC methods | Register/Login/ValidateToken/RefreshToken | **Create / FindOne / FindMany / CheckStock** |
 | Phân trang | Không có | `FindMany(page, limit)` dùng `findAndCount` |
-| Seed dữ liệu | Không | **Seed 5 sản phẩm** khi bảng rỗng (hook `OnApplicationBootstrap`) |
+| Seed dữ liệu | Không | **Seed 5 sản phẩm** qua `src/database/seeds/` (bật bằng `SEED_ON_BOOT`, hoặc `npm run seed`) |
 | api-gateway REST | `/auth/*` | thêm **`/products`** (GET list, GET :id, POST create) |
 | Bảo vệ route | `JwtAuthGuard` (mới viết) | **tái dùng** `JwtAuthGuard` của Day 2 cho `POST /products` |
 | Lỗi gRPC→HTTP | `rpc-to-http.ts` (mới viết) | **tái dùng** `rpc-to-http.ts` |
@@ -32,18 +32,28 @@ services/product-service/
 │   eslint.config.mjs, .prettierrc                         # đổi tên + bỏ dep jwt/bcrypt/redis
 └── src/
     ├── main.ts                        # bootstrap gRPC, package 'product', cổng 50052
-    ├── app.module.ts                  # wire TypeORM (product_db) — KHÔNG có Jwt/Redis
-    ├── data-source.ts                 # cho TypeORM CLI (giống Day 2)
+    ├── app.module.ts                  # wire TypeORM (product_db) + SeedModule — KHÔNG có Jwt/Redis
     ├── common/proto-path.util.ts      # copy y hệt Day 1/2 (tìm file proto)
     ├── product/
     │   ├── product.controller.ts      # 4 @GrpcMethod khớp proto/product.proto
-    │   ├── product.service.ts         # ⭐ logic: create/findOne/findMany/checkStock + seed
+    │   ├── product.service.ts         # ⭐ logic: create/findOne/findMany/checkStock
     │   ├── product.entity.ts          # entity TypeORM = bảng "products"
     │   ├── product.interface.ts       # type khớp proto (giống auth.interface.ts)
     │   └── product.service.spec.ts    # unit test CheckStock
-    └── migrations/
-        └── <timestamp>-InitProduct.ts # SQL tạo bảng products
+    └── database/                      # mọi thứ liên quan DB gom về đây
+        ├── data-source.ts             # cho TypeORM CLI + npm run seed
+        ├── migrations/
+        │   └── <timestamp>-InitProduct.ts  # SQL tạo bảng products
+        └── seeds/
+            ├── seeder.interface.ts    # interface Seeder { name; run(dataSource) }
+            ├── product.seeder.ts      # 5 sản phẩm mẫu, idempotent theo name
+            ├── index.ts               # SEEDERS + runSeeders()
+            ├── seed.module.ts         # chạy seed khi boot nếu SEED_ON_BOOT=true
+            ├── run-seed.ts            # entry cho `npm run seed`
+            └── product.seeder.spec.ts # unit test tính idempotent
 ```
+
+> `auth-service` cũng được dựng **y hệt** structure này (`database/{data-source.ts,migrations,seeds}`), với `user.seeder.ts` seed 1 user dev — nên 2 service đọc giống nhau hoàn toàn.
 
 ### api-gateway (thêm 1 nhóm "client của product-service")
 ```
@@ -179,12 +189,13 @@ services/api-gateway/src/
 
 1. `proto/product.proto` — hợp đồng: 4 rpc + message. Chú ý `product_id` (snake_case).
 2. `product-service/src/product/product.entity.ts` — bảng `products` (dễ nhất).
-3. `product-service/src/product/product.service.ts` — **đọc kỹ nhất**: 4 method + seed.
+3. `product-service/src/product/product.service.ts` — **đọc kỹ nhất**: 4 method (thuần business logic, không có seed).
 4. `product-service/src/app.module.ts` — wire TypeORM (so với Day 2: **thiếu** Jwt & Redis).
-5. `product-service/src/product/product.service.spec.ts` — cách test CheckStock bằng repo giả.
-6. `api-gateway/src/product-client/dto/product.dto.ts` — luật validate input.
-7. `api-gateway/src/product-client/product.controller.ts` — REST + chỗ gắn `@UseGuards`.
-8. `api-gateway/src/product-client/product-client.module.ts` — cách **import AuthClientModule** để mượn guard.
+5. `product-service/src/database/seeds/` — `seeder.interface.ts` → `product.seeder.ts` → `index.ts` → `seed.module.ts`.
+6. `product-service/src/product/product.service.spec.ts` — cách test CheckStock bằng repo giả.
+7. `api-gateway/src/product-client/dto/product.dto.ts` — luật validate input.
+8. `api-gateway/src/product-client/product.controller.ts` — REST + chỗ gắn `@UseGuards`.
+9. `api-gateway/src/product-client/product-client.module.ts` — cách **import AuthClientModule** để mượn guard.
 
 ---
 
@@ -197,6 +208,7 @@ imports: [
   ConfigModule.forRoot({ isGlobal: true }),      // đọc env DATABASE_URL, GRPC_URL
   TypeOrmModule.forRootAsync({ ...product_db }),  // kết nối product_db, migrationsRun:true, synchronize:false
   TypeOrmModule.forFeature([Product]),            // để inject Repository<Product>
+  SeedModule,                                     // seed dữ liệu mẫu (chỉ khi SEED_ON_BOOT=true)
 ],
 controllers: [ProductController],
 providers: [ProductService],
@@ -213,17 +225,52 @@ providers: [ProductService],
 
 ## 6. Những cái MỚI về mặt kỹ thuật ở Day 3
 
-### 6.1. Seed dữ liệu bằng `OnApplicationBootstrap`
+### 6.1. Seed dữ liệu: tách hẳn khỏi service, đặt cạnh migrations
+
+**Nguyên tắc:** seed **không** phải business logic, nên không nằm trong `product.service.ts`. Nó là việc của tầng database → gom vào `src/database/seeds/`, ngang hàng với `src/database/migrations/`.
+
+Cũng **không** biến seed thành migration. Migration = thay đổi **schema**, chạy cả trên prod, có `down()` để revert. Dữ liệu demo mà nhét vào migration history thì prod cũng bị chèn 5 sản phẩm ảo.
+
+**Mỗi seeder là 1 class thuần TypeScript**, chỉ nhận `DataSource` — không phụ thuộc Nest, nên dùng được cho cả 2 đường chạy:
+
 ```ts
-export class ProductService implements OnApplicationBootstrap {
+// database/seeds/seeder.interface.ts
+export interface Seeder {
+  readonly name: string;
+  run(dataSource: DataSource): Promise<string>;   // trả mô tả kết quả để log
+}
+
+// database/seeds/product.seeder.ts — idempotent theo `name`
+const existingNames = new Set((await repo.find({ select: { name: true } })).map(p => p.name));
+const missing = SEED_PRODUCTS.filter(p => !existingNames.has(p.name));
+if (missing.length > 0) await repo.save(missing.map(p => repo.create(p)));
+```
+
+**2 cách chạy, dùng chung `runSeeders()` ở `index.ts`:**
+
+| Cách | Khi nào | File |
+|---|---|---|
+| Tự chạy lúc boot | dev — `docker-compose.yml` set `SEED_ON_BOOT=true` | `seed.module.ts` |
+| Chạy tay | bất cứ lúc nào: `docker compose exec product-service npm run seed` | `run-seed.ts` |
+
+```ts
+// seed.module.ts — module class cũng implement được lifecycle hook
+@Module({})
+export class SeedModule implements OnApplicationBootstrap {
+  constructor(private dataSource: DataSource, private config: ConfigService) {}
   async onApplicationBootstrap() {
-    if (await this.products.count() > 0) return;   // đã có data → bỏ qua
-    await this.products.save(SEED_PRODUCTS.map(p => this.products.create(p)));
+    if (this.config.get('SEED_ON_BOOT') !== 'true') return;   // prod không set → không seed
+    await runSeeders(this.dataSource, m => this.logger.log(m));
   }
 }
 ```
-- `OnApplicationBootstrap` là **lifecycle hook** của NestJS: chạy **1 lần** sau khi mọi module init xong (và **sau** khi migration đã tạo bảng). Đây là chỗ đúng để seed — nếu seed trong constructor sẽ lỗi vì bảng có thể chưa tồn tại.
-- Idempotent: chỉ seed khi `count() === 0`, nên restart container nhiều lần **không** nhân đôi dữ liệu.
+
+3 điểm cần nhớ:
+- Vẫn là **`OnApplicationBootstrap`** (không phải constructor / `OnModuleInit`): hook này chạy sau khi mọi module init xong — tức **sau** khi `migrationsRun: true` tạo xong bảng — nên seed chắc chắn có bảng để ghi.
+- `DataSource` và `ConfigService` inject thẳng vào **class module** được, vì `TypeOrmCoreModule` và `ConfigModule.forRoot({ isGlobal: true })` đều là global.
+- **Idempotent theo từng bản ghi** (so `name` / `email`) chứ không phải "chỉ seed khi bảng rỗng". Nhờ vậy sau này thêm sản phẩm vào `SEED_PRODUCTS` thì lần seed sau vẫn bổ sung được phần thiếu, mà không đụng dữ liệu đang có.
+
+`auth-service` dùng đúng structure đó với `user.seeder.ts` — seed 1 user dev (`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, default `admin@example.com` / `admin12345`) để test `POST /auth/login` ngay mà không cần register. Password vẫn được hash bằng bcrypt cùng `SALT_ROUNDS = 10` như `AuthService.register`, và email đã tồn tại thì **bỏ qua, không ghi đè password**.
 
 ### 6.2. Phân trang với `findAndCount`
 `findAndCount` trả 1 lượt cả `[danh_sách, tổng_số]` → đủ cho client biết có bao nhiêu trang. `skip = (page-1)*limit`, `take = limit`. Có **clamp** `limit ≤ 100` để 1 client không thể xin 1 triệu bản ghi làm sập DB.
@@ -268,7 +315,7 @@ CheckStock(product_id, quantity) → { available, price, remaining }
 **Mới ở Day 3:**
 - Service thứ 2 với **DB tách hẳn** (`product_db`) — chứng minh database-per-service.
 - 1 request `POST /products` chạm **3 process** (gateway → auth → product) nhờ **tái dùng** guard.
-- Lifecycle hook `OnApplicationBootstrap` để **seed** dữ liệu.
+- Tầng `src/database/` (data-source + migrations + seeds) và **seed tách khỏi service**, bật/tắt bằng `SEED_ON_BOOT`.
 - **Phân trang** (`findAndCount` + clamp) và kiểu `double precision`.
 - Method `CheckStock` **chỉ gRPC, không REST** → kiểm bằng **unit test**.
 
@@ -278,7 +325,8 @@ CheckStock(product_id, quantity) → { available, price, remaining }
 
 1. `docker compose logs -f api-gateway auth-service product-service` (3 cửa sổ) rồi `POST /products` có token — xem request "nhảy" gateway → auth (validate) → product (insert).
 2. `docker compose exec postgres psql -U app -d product_db -c 'SELECT * FROM products;'` — thấy 5 sản phẩm seed. Rồi thử `\l` xem `product_db` **tách riêng** `auth_db` (không có bảng `users` trong `product_db`).
-3. `docker compose restart product-service` rồi xem log: KHÔNG thấy "Đã seed..." lần 2 (vì bảng đã có data) — chứng minh seed idempotent.
+3. `docker compose restart product-service` rồi xem log: lần 2 in `seed "products": thêm 0, bỏ qua 5` — chứng minh seed idempotent. Chạy `docker compose exec product-service npm run seed` cũng ra đúng như vậy.
+3b. Xoá 1 sản phẩm seed bằng `psql ... -c "DELETE FROM products WHERE name='Bàn phím cơ'"` rồi `npm run seed` lại → in `thêm 1, bỏ qua 4`. Đây là điểm khác so với kiểu "chỉ seed khi bảng rỗng".
 4. Gọi `POST /products` **không** token → 401; **sai** token → 401; body `price: -5` → 400. Đối chiếu xem lỗi nào do guard, lỗi nào do ValidationPipe.
 5. Chạy `npm test` trong `services/product-service` và mở `product.service.spec.ts`: xem cách test dùng **repo giả bằng Map** (không cần DB thật) để kiểm logic `CheckStock` — kỹ thuật test service tách khỏi hạ tầng.
 6. (Chuẩn bị Day 4) Đọc `proto/order.proto` và để ý order-service sẽ gọi `CheckStock` — hình dung nó ghép vào flow `CreateOrder` thế nào.

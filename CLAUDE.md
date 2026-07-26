@@ -26,12 +26,24 @@ services/<name>/
 ├── src/
 │   ├── main.ts          # bootstrap microservice (gRPC listen hoặc RMQ consumer)
 │   ├── app.module.ts
+│   ├── database/        # mọi thứ tầng DB gom về đây
+│   │   ├── data-source.ts       # DataSource cho TypeORM CLI + npm run seed
+│   │   ├── migrations/          # chỉ thay đổi SCHEMA
+│   │   └── seeds/               # dữ liệu mẫu (xem mục Seed bên dưới)
 │   └── <feature>/       # controller (gRPC handler) + service + entity + dto
 ├── test/
 ├── package.json
 ├── tsconfig.json
 └── Dockerfile
 ```
+
+## Seed dữ liệu (BẮT BUỘC theo pattern này)
+- Seed **KHÔNG** nằm trong `<feature>.service.ts` (service chỉ chứa business logic) và **KHÔNG** viết thành migration (migration chỉ dành cho schema, chạy cả trên prod).
+- Mỗi service có `src/database/seeds/` gồm: `seeder.interface.ts` (interface `Seeder { name; run(dataSource) }`), `<feature>.seeder.ts`, `index.ts` (`SEEDERS` + `runSeeders()`), `seed.module.ts` (chạy khi boot nếu `SEED_ON_BOOT=true`), `run-seed.ts` (entry cho `npm run seed`).
+- Seeder là class thuần TypeScript, chỉ nhận `DataSource` — không phụ thuộc Nest, để dùng được cho cả 2 đường chạy.
+- Seeder **phải idempotent theo từng bản ghi** (so key nghiệp vụ như `name`/`email`), không phải kiểu "chỉ seed khi bảng rỗng", và không ghi đè dữ liệu đang có.
+- `SEED_ON_BOOT` chỉ set ở `docker-compose.yml` (dev). `docker-compose.prod.yml` KHÔNG set.
+- Có unit test cho tính idempotent của seeder.
 
 ## Proto
 - `proto/auth.proto`, `proto/product.proto`, `proto/order.proto` đã định nghĩa sẵn contract.
