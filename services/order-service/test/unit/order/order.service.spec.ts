@@ -32,8 +32,23 @@ function stock(over: Partial<CheckStockResponse> = {}): CheckStockResponse {
   return { available: true, price: 1000, remaining: 100, ...over };
 }
 
-function makeDeps(checkStock: jest.Mock) {
-  const productClient = { checkStock } as unknown as ProductClientService;
+function makeDeps(
+  checkStock: jest.Mock,
+  overrides: {
+    decrementStock?: jest.Mock;
+    releaseStock?: jest.Mock;
+  } = {},
+) {
+  const decrementStock =
+    overrides.decrementStock ??
+    jest.fn(async () => ({ success: true, remaining: 0 }));
+  const releaseStock =
+    overrides.releaseStock ?? jest.fn(async () => ({ remaining: 0 }));
+  const productClient = {
+    checkStock,
+    decrementStock,
+    releaseStock,
+  } as unknown as ProductClientService;
   const publisher = {
     publishOrderCreated: jest.fn(async () => undefined),
   } as unknown as RabbitmqPublisher;
@@ -110,6 +125,41 @@ describe('OrderService.create', () => {
       }),
     ).rejects.toBeInstanceOf(RpcException);
 
+    expect(repo.save).not.toHaveBeenCalled();
+    expect(publisher.publishOrderCreated).not.toHaveBeenCalled();
+  });
+
+  it('2 item, item thứ 2 hết hàng khi decrement → rollback item 1, KHÔNG save đơn, KHÔNG publish', async () => {
+    const repo = createOrderRepoMock();
+    const checkStock = jest.fn().mockResolvedValue(stock({ price: 1000 }));
+    const decrementStock = jest
+      .fn()
+      .mockResolvedValueOnce({ success: true, remaining: 5 }) // item 1: p1
+      .mockResolvedValueOnce({ success: false, remaining: 0 }); // item 2: p2, hết hàng
+    const releaseStock = jest.fn(async () => ({ remaining: 10 }));
+    const { productClient, publisher } = makeDeps(checkStock, {
+      decrementStock,
+      releaseStock,
+    });
+    const service = new OrderService(repo, productClient, publisher);
+
+    await expect(
+      service.create({
+        userId: 'u1',
+        email: 'u1@example.com',
+        items: [
+          { productId: 'p1', quantity: 2 },
+          { productId: 'p2', quantity: 3 },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(RpcException);
+
+    expect(decrementStock).toHaveBeenCalledTimes(2);
+    expect(decrementStock).toHaveBeenNthCalledWith(1, 'p1', 2);
+    expect(decrementStock).toHaveBeenNthCalledWith(2, 'p2', 3);
+    // Chỉ item 1 (đã decrement thành công) được hoàn kho, item 2 không cần vì chưa trừ.
+    expect(releaseStock).toHaveBeenCalledTimes(1);
+    expect(releaseStock).toHaveBeenCalledWith('p1', 2);
     expect(repo.save).not.toHaveBeenCalled();
     expect(publisher.publishOrderCreated).not.toHaveBeenCalled();
   });

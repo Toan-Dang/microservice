@@ -5,9 +5,11 @@ import { ClientGrpc, RpcException } from '@nestjs/microservices';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import {
   CheckStockResponse,
+  DecrementStockResponse,
   PRODUCT_CLIENT,
   PRODUCT_SERVICE_NAME,
   ProductGrpcService,
+  ReleaseStockResponse,
 } from './product-client.constants';
 
 @Injectable()
@@ -29,10 +31,7 @@ export class ProductClientService implements OnModuleInit {
     productId: string,
     quantity: number,
   ): Promise<CheckStockResponse> {
-    const timeoutMs = this.config.get<number>(
-      'PRODUCT_GRPC_TIMEOUT_MS',
-      3000,
-    );
+    const timeoutMs = this.config.get<number>('PRODUCT_GRPC_TIMEOUT_MS', 3000);
     try {
       return await firstValueFrom(
         this.productService
@@ -44,6 +43,52 @@ export class ProductClientService implements OnModuleInit {
         throw new RpcException({
           code: status.DEADLINE_EXCEEDED,
           message: `product-service.CheckStock quá thời gian chờ (${timeoutMs}ms)`,
+        });
+      }
+      throw error;
+    }
+  }
+
+  /** Gọi product-service.DecrementStock (gRPC, sync) để trừ kho atomic. */
+  async decrementStock(
+    productId: string,
+    quantity: number,
+  ): Promise<DecrementStockResponse> {
+    const timeoutMs = this.config.get<number>('PRODUCT_GRPC_TIMEOUT_MS', 3000);
+    try {
+      return await firstValueFrom(
+        this.productService
+          .decrementStock({ productId, quantity })
+          .pipe(timeout(timeoutMs)),
+      );
+    } catch (error) {
+      if (error instanceof TimeoutError) {
+        throw new RpcException({
+          code: status.DEADLINE_EXCEEDED,
+          message: `product-service.DecrementStock quá thời gian chờ (${timeoutMs}ms)`,
+        });
+      }
+      throw error;
+    }
+  }
+
+  /** Gọi product-service.ReleaseStock (gRPC, sync) để hoàn kho khi rollback. */
+  async releaseStock(
+    productId: string,
+    quantity: number,
+  ): Promise<ReleaseStockResponse> {
+    const timeoutMs = this.config.get<number>('PRODUCT_GRPC_TIMEOUT_MS', 3000);
+    try {
+      return await firstValueFrom(
+        this.productService
+          .releaseStock({ productId, quantity })
+          .pipe(timeout(timeoutMs)),
+      );
+    } catch (error) {
+      if (error instanceof TimeoutError) {
+        throw new RpcException({
+          code: status.DEADLINE_EXCEEDED,
+          message: `product-service.ReleaseStock quá thời gian chờ (${timeoutMs}ms)`,
         });
       }
       throw error;

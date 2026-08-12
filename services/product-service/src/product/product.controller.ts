@@ -4,10 +4,14 @@ import {
   CheckStockRequest,
   CheckStockResponse,
   CreateProductRequest,
+  DecrementStockRequest,
+  DecrementStockResponse,
   FindManyRequest,
   FindOneRequest,
   ProductList,
   ProductMessage,
+  ReleaseStockRequest,
+  ReleaseStockResponse,
 } from './product.interface';
 import { ProductService } from './product.service';
 
@@ -33,5 +37,15 @@ export class ProductController {
   @GrpcMethod('ProductService', 'CheckStock')
   checkStock(data: CheckStockRequest): Promise<CheckStockResponse> {
     return this.productService.checkStock(data.productId, data.quantity);
+  }
+
+  @GrpcMethod('ProductService', 'DecrementStock')
+  decrementStock(data: DecrementStockRequest): Promise<DecrementStockResponse> {
+    return this.productService.decrementStock(data.productId, data.quantity);
+  }
+
+  @GrpcMethod('ProductService', 'ReleaseStock')
+  releaseStock(data: ReleaseStockRequest): Promise<ReleaseStockResponse> {
+    return this.productService.releaseStock(data.productId, data.quantity);
   }
 }
