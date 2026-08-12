@@ -8,6 +8,8 @@ service ProductService {
   rpc FindOne (FindOneRequest) returns (Product);
   rpc FindMany (FindManyRequest) returns (ProductList);
   rpc CheckStock (CheckStockRequest) returns (CheckStockResponse);
+  rpc DecrementStock (DecrementStockRequest) returns (DecrementStockResponse);
+  rpc ReleaseStock (ReleaseStockRequest) returns (ReleaseStockResponse);
 }
 
 message Product {
@@ -46,4 +48,23 @@ message CheckStockResponse {
   bool available = 1;
   double price = 2;
   int32 remaining = 3;
+}
+
+message DecrementStockRequest {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message DecrementStockResponse {
+  bool success = 1;
+  int32 remaining = 2;
+}
+
+message ReleaseStockRequest {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message ReleaseStockResponse {
+  int32 remaining = 1;
 }

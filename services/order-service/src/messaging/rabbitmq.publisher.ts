@@ -88,7 +88,9 @@ export class RabbitmqPublisher implements OnModuleInit, OnModuleDestroy {
       await this.channel?.close();
       await this.connection?.close();
     } catch (error) {
-      this.logger.warn(`Đóng kết nối RabbitMQ lỗi: ${(error as Error).message}`);
+      this.logger.warn(
+        `Đóng kết nối RabbitMQ lỗi: ${(error as Error).message}`,
+      );
     }
   }
 }

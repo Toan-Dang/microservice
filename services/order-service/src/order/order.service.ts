@@ -6,11 +6,7 @@ import { Repository } from 'typeorm';
 import { Order, OrderItemData } from '../entities';
 import { ProductClientService } from '../product-client/product-client.service';
 import { RabbitmqPublisher } from '../messaging/rabbitmq.publisher';
-import {
-  CreateOrderRequest,
-  OrderList,
-  OrderMessage,
-} from './order.interface';
+import { CreateOrderRequest, OrderList, OrderMessage } from './order.interface';
 
 @Injectable()
 export class OrderService {
@@ -82,6 +78,26 @@ export class OrderService {
       total += stock.price * quantity;
     }
 
+    // Trừ kho THẬT SỰ, tuần tự từng item (không Promise.all — cần biết chính
+    // xác item nào fail để rollback đúng phần đã trừ). CheckStock ở loop trên
+    // chỉ là snapshot, không atomic, nên dù đã pass vẫn có thể hết hàng ở đây
+    // do race với đơn khác — decrementStock mới là điểm chặn race thật (SQL
+    // atomic UPDATE ... WHERE stock >= qty).
+    for (let k = 0; k < orderItems.length; k++) {
+      const item = orderItems[k];
+      const decremented = await this.productClient.decrementStock(
+        item.productId,
+        item.quantity,
+      );
+      if (!decremented.success) {
+        await this.rollbackDecrements(orderItems.slice(0, k));
+        throw new RpcException({
+          code: status.FAILED_PRECONDITION,
+          message: `Sản phẩm ${item.productId} vừa hết hàng, không thể tạo đơn`,
+        });
+      }
+    }
+
     const saved = await this.orders.save(
       this.orders.create({
         userId: data.userId,
@@ -131,6 +147,25 @@ export class OrderService {
       order: { createdAt: 'ASC', id: 'ASC' },
     });
     return { orders: orders.map((o) => this.toMessage(o)) };
+  }
+
+  /**
+   * Hoàn kho cho các item đã decrement thành công trước khi 1 item giữa
+   * chừng hết hàng. Lỗi releaseStock (vd network) chỉ log nghiêm trọng, KHÔNG
+   * throw đè lên lỗi gốc (hết hàng) — kho có thể bị lệch thật, đây là hạn chế
+   * đã biết của cách làm không có saga/outbox, sẽ vá ở phase 2.
+   */
+  private async rollbackDecrements(items: OrderItemData[]): Promise<void> {
+    for (const item of items) {
+      try {
+        await this.productClient.releaseStock(item.productId, item.quantity);
+      } catch (error) {
+        this.logger.error(
+          `Rollback releaseStock thất bại cho productId=${item.productId}, quantity=${item.quantity} — kho có thể bị lệch`,
+          error as Error,
+        );
+      }
+    }
   }
 
   private toMessage(order: Order): OrderMessage {

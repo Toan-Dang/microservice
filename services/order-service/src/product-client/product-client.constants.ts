@@ -10,11 +10,29 @@ export interface CheckStockResponse {
   remaining: number;
 }
 
-// order-service chỉ cần CheckStock của ProductService (proto/product.proto).
-// proto-loader trả snake_case -> camelCase nên product_id thành productId.
+export interface DecrementStockResponse {
+  success: boolean;
+  remaining: number;
+}
+
+export interface ReleaseStockResponse {
+  remaining: number;
+}
+
+// order-service cần CheckStock/DecrementStock/ReleaseStock của ProductService
+// (proto/product.proto). proto-loader trả snake_case -> camelCase nên
+// product_id thành productId.
 export interface ProductGrpcService {
   checkStock(data: {
     productId: string;
     quantity: number;
   }): Observable<CheckStockResponse>;
+  decrementStock(data: {
+    productId: string;
+    quantity: number;
+  }): Observable<DecrementStockResponse>;
+  releaseStock(data: {
+    productId: string;
+    quantity: number;
+  }): Observable<ReleaseStockResponse>;
 }

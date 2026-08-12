@@ -38,3 +38,22 @@ export interface CheckStockResponse {
   price: number;
   remaining: number;
 }
+
+export interface DecrementStockRequest {
+  productId: string;
+  quantity: number;
+}
+
+export interface DecrementStockResponse {
+  success: boolean;
+  remaining: number;
+}
+
+export interface ReleaseStockRequest {
+  productId: string;
+  quantity: number;
+}
+
+export interface ReleaseStockResponse {
+  remaining: number;
+}
