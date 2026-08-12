@@ -1,10 +1,11 @@
-#!/bin/bash
+#!/bin/sh
 # Tạo nhiều database trong 1 Postgres container (database-per-service, tiết kiệm chi phí).
 # Đọc biến POSTGRES_MULTIPLE_DATABASES (danh sách cách nhau bởi dấu phẩy).
+# Dùng /bin/sh (POSIX) vì image postgres:16-alpine KHÔNG có bash.
 set -e
 set -u
 
-function create_database() {
+create_database() {
 	local db=$1
 	echo "  Creating database '$db'"
 	psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
