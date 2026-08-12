@@ -1,8 +1,8 @@
 # server-run.md — Điều gì xảy ra khi bật server (thứ tự file chạy)
 
 > File này trả lời câu hỏi: **"Khi tôi gõ `docker compose up`, những file nào chạy, theo thứ tự nào, cho tới lúc server sẵn sàng nhận request?"**
-> Đọc kèm `note/day 2.md` và `note/day 3.md` (mục 3 của 2 file đó nói về flow *sau khi* server đã chạy — tức khi có request tới; file này nói về giai đoạn *khởi động*, trước khi có request nào).
-> *(Cập nhật Day 3: đã thêm **product-service** vào Lớp 2 — xem Mục 1b.)*
+> Đọc kèm `note/day 2.md`, `note/day 3.md`, `note/day 4.md` (mục 3 của các file đó nói về flow *sau khi* server đã chạy — tức khi có request tới; file này nói về giai đoạn *khởi động*, trước khi có request nào).
+> *(Cập nhật Day 3: thêm **product-service** vào Lớp 2 — xem Mục 1b. Cập nhật Day 4: thêm **order-service** — Mục 1c — và **notification-worker** — Mục 1d; RabbitMQ từ đây được dùng thật.)*
 >
 > Bạn quen monolith: chỉ 1 process, `main.ts` → `app.listen(3000)` là xong. Ở đây có **nhiều process độc lập** khởi động song song, mỗi cái có trình tự riêng, và có thứ tự phụ thuộc giữa chúng (DB phải sống trước khi service kết nối).
 
@@ -19,26 +19,28 @@
    │                                                                                │
    ▼                          ▼                              ▼                       │
 🗄 postgres                🔴 redis                     🐰 rabbitmq                   │
-(chạy init-multiple-dbs.sh   (sẵn sàng ngay)             (Day 2 chưa dùng)           │
- nếu volume MỚI → tạo                                                                 │
+(chạy init-multiple-dbs.sh   (sẵn sàng ngay)             (Day 4 dùng thật:            │
+ nếu volume MỚI → tạo                                     exchange 'orders')          │
  auth_db/product_db/order_db)                                                        │
-   │  healthcheck: pg_isready   │ healthcheck: redis-cli ping                         │
-   │  → tới khi "healthy"       │ → "healthy"                                         │
-   └──────────┬─────────────────┘                                                     │
-              │  (compose CHỜ 2 cái này healthy rồi mới bật lớp 2)                    │
+   │  healthcheck: pg_isready   │ redis-cli ping    │ rabbitmq-diagnostics ping       │
+   │  → tới khi "healthy"       │ → "healthy"        │ → "healthy"                     │
+   └──────────┬─────────────────┴────────────────────┘                                │
+              │  (compose CHỜ hạ tầng healthy rồi mới bật service)                     │
    ┌──────────┴───────────────── LỚP 2: SERVICE CODE ─────────────────────────────┐  │
    │                                                                               │  │
-   ▼                        ▼                                   ▼                  │  │
-🟦 auth-service        🟪 product-service              🟩 api-gateway (HTTP :3000) │  │
-   (gRPC :50051)          (gRPC :50052)                 depends_on:                │  │
-   depends_on:            depends_on:                     auth-service(started),   │  │
-     postgres(healthy),     postgres(healthy)             product-service(started),│  │
-     redis(healthy)       → xem MỤC 1b                    redis(healthy)           │  │
-   → xem MỤC 1          (giống auth, bỏ Jwt/Redis,      → xem MỤC 2                │  │
-                          thêm SEED khi boot)                                       │  │
+   ▼              ▼                    ▼                         ▼                 │  │
+🟦 auth-service  🟪 product-service  🟧 order-service       🟩 api-gateway (:3000) │  │
+   (gRPC :50051)   (gRPC :50052)       (gRPC :50053)          depends_on:          │  │
+   depends_on:     depends_on:         depends_on:              auth(started),      │  │
+     postgres,       postgres          postgres(healthy),       product(started),   │  │
+     redis          → MỤC 1b           rabbitmq(healthy)        redis(healthy)      │  │
+   → MỤC 1        (bỏ Jwt/Redis,     → MỤC 1c               → MỤC 2                │  │
+                   thêm SEED)         (gọi product +                                │  │
+                                       publish RMQ)                                 │  │
+   │                                                                               │  │
+   │   🟨 notification-worker  (KHÔNG cổng) — depends_on: rabbitmq(healthy) → MỤC 1d │  │
    └───────────────────────────────────────────────────────────────────────────────┘  │
                                                                                         │
-   (order-service, notification-worker: CHƯA scaffold — tới Day 4)                       │
 ```
 
 **Ý quan trọng:** `api-gateway` chỉ `depends_on: ... (service_started)` — tức chỉ chờ *process* auth-service/product-service bật, **không** chờ chúng "sẵn sàng logic". Đây là lý do gRPC client của gateway **kết nối lười (lazy)**: nó không nối tới các service lúc boot, mà tới **request đầu tiên** mới nối. Nhờ vậy thứ tự bật giữa các service không gây crash.
@@ -121,9 +123,10 @@ Trình tự **y hệt Mục 1**, chỉ khác 3 điểm. Bắt đầu từ `📄 
                        (Create / FindOne / FindMany / CheckStock)
    │
    ├─ 🌱 LIFECYCLE HOOK OnApplicationBootstrap  (chạy SAU khi module init + migration xong):
-   │      📄 product.service.ts → onApplicationBootstrap():
-   │         if (count() === 0) → INSERT 5 sản phẩm mẫu ─► 🗄 product_db
-   │         (đã có data → bỏ qua → idempotent, restart không nhân đôi)
+   │      📄 database/seeds/seed.module.ts → onApplicationBootstrap():
+   │         if (SEED_ON_BOOT !== 'true') return                    (prod không set → bỏ qua)
+   │         runSeeders() → 📄 product.seeder.ts: chèn sản phẩm mẫu CÒN THIẾU (idempotent theo `name`)
+   │         └─► 🗄 product_db   (đã có → bỏ qua từng bản ghi, restart không nhân đôi)
    │
    ├─ app.enableShutdownHooks()
    └─ await app.listen()   → 🚀 gRPC BIND :50052  ✅ product-service READY
@@ -132,9 +135,71 @@ Trình tự **y hệt Mục 1**, chỉ khác 3 điểm. Bắt đầu từ `📄 
 **3 khác biệt so với auth-service (Mục 1):**
 - Kết nối `product_db` (không phải `auth_db`) — **DB tách hẳn**, database-per-service.
 - **Không** `JwtModule`/`RedisService` (product không lo token/redis).
-- Có thêm bước **seed** qua `OnApplicationBootstrap` — chỉ chạy khi bảng rỗng.
+- Có thêm **`SeedModule`** chạy ở `OnApplicationBootstrap` — chỉ khi `SEED_ON_BOOT=true`, idempotent theo từng bản ghi (xem Day 3 mục 6.1).
 
-> Log để nhận ra seed đã chạy: dòng `[ProductService] Đã seed 5 sản phẩm mẫu`. Restart lần sau sẽ **không** thấy dòng này nữa.
+> Log để nhận ra seed đã chạy: dòng `seed "products": thêm 5, bỏ qua 0`. Restart lần sau in `thêm 0, bỏ qua 5` (idempotent).
+
+---
+
+## 1c. Bên trong order-service khởi động (Day 4 — service đầu tiên vừa gọi service khác, vừa nối broker)
+
+Bắt đầu từ `📄 services/order-service/src/main.ts` (createMicroservice, package `'order'`, cổng `:50053`):
+
+```
+📄 main.ts → createMicroservice(AppModule, { GRPC, package:'order', url :50053 })
+   │
+   ▼
+📄 app.module.ts   ── Nest khởi tạo module:
+     (1) ConfigModule.forRoot({isGlobal})     → đọc DATABASE_URL, GRPC_URL, PRODUCT_GRPC_URL, RABBITMQ_URL
+     (2) TypeOrmModule.forRootAsync(...)       → MỞ KẾT NỐI ═══TCP═══► 🗄 postgres (order_db)
+           └─ migrationsRun:true → chạy 📄 migrations/<ts>-InitOrder.ts (tạo bảng "orders" + index user_id)
+     (3) TypeOrmModule.forFeature([Order])     → tạo Repository<Order>
+     (4) ProductClientModule                   → ClientsModule.registerAsync ClientGrpc tới :50052
+           📄 product-client.service.ts        → onModuleInit: getService('ProductService') (proxy, LAZY — chưa nối)
+     (5) MessagingModule                        → provider 📄 messaging/rabbitmq.publisher.ts
+           └─ 🌱 OnModuleInit: 🔌 amqp.connect(RABBITMQ_URL) ═══TCP═══► 🐰 rabbitmq
+                 + assertExchange('orders','topic')   (lỗi lúc này chỉ log, publish sau sẽ reconnect)
+     (6) controllers: 📄 order/order.controller.ts → đăng ký 3 @GrpcMethod (CreateOrder/FindOne/FindByUser)
+   │
+   ├─ app.enableShutdownHooks()   → khi tắt: publisher đóng channel + connection RabbitMQ sạch
+   └─ await app.listen()   → 🚀 gRPC BIND :50053  ✅ order-service READY
+```
+
+**Khác product-service (Mục 1b):** nối `order_db`; **thêm** 2 thứ — proxy gRPC tới product-service (lazy, cho `CheckStock`) và **kết nối RabbitMQ ngay lúc boot** để sẵn sàng publish. Không có seed.
+
+> Log nhận ra đã sẵn sàng: `[RabbitmqPublisher] Đã kết nối RabbitMQ, exchange 'orders' (topic) sẵn sàng` rồi `Nest microservice successfully started`.
+
+---
+
+## 1d. Bên trong notification-worker khởi động (Day 4 — process KHÔNG cổng, chỉ consume)
+
+`📄 services/notification-worker/src/main.ts` dùng **`createApplicationContext`** — không mở HTTP cũng không gRPC; chỉ dựng DI rồi để consumer tự kéo message.
+
+```
+📄 main.ts → NestFactory.createApplicationContext(AppModule)   ❗ KHÔNG listen cổng nào
+   │
+   ▼
+📄 app.module.ts:
+     (1) ConfigModule.forRoot({isGlobal})   → đọc RABBITMQ_URL, SES_FROM_EMAIL, AWS_REGION
+     (2) ConsumerModule → imports EmailModule
+           📄 email/email.service.ts   → constructor đọc SES_FROM_EMAIL (rỗng = chế độ mock)
+           📄 consumer/consumer.service.ts (provider)
+   │
+   ├─ 🌱 LIFECYCLE HOOK OnApplicationBootstrap:
+   │     📄 consumer.service.ts → connect():
+   │        🔌 amqp.connect(RABBITMQ_URL) ═══TCP═══► 🐰 rabbitmq
+   │        ├─ assertExchange('orders','topic')            (khớp publisher order-service)
+   │        ├─ assertExchange('orders.dlx','topic') + assertQueue('...dlq') + bind   (đường chết)
+   │        ├─ assertQueue('notifications.order-created', { deadLetterExchange:'orders.dlx' })
+   │        ├─ bindQueue(queue,'orders','order.created')   (đăng ký nghe event)
+   │        └─ channel.consume(queue, handle)              ▶️ BẮT ĐẦU nghe
+   │
+   ├─ app.enableShutdownHooks()   → khi tắt: đóng channel + connection sạch
+   └─ (không có app.listen)   ✅ worker READY — nằm chờ message, không nhận request từ ai
+```
+
+> Log nhận ra đã sẵn sàng: `[ConsumerService] Đang lắng nghe 'order.created' trên queue 'notifications.order-created'` rồi `[Bootstrap] notification-worker đã khởi động`.
+> ❗ order-service **và** worker đều `assertExchange('orders','topic')` — ai boot trước cũng được, `assert` là idempotent (chưa có thì tạo, có rồi thì thôi). Nhờ vậy không cần ép thứ tự boot giữa 2 bên.
 
 ---
 
@@ -161,12 +226,19 @@ Lệnh: dev `npm run start:dev` ; prod `node dist/main.js`. Bắt đầu từ `m
    │           │             📄 jwt-auth.guard.ts     (JwtAuthGuard)
    │           └─ exports: [AuthClientService, JwtAuthGuard]  ← để module khác mượn guard
    │
-   │     (2b) 📄 product-client/product-client.module.ts   ── MỚI (Day 3) "client của product-service":
+   │     (2b) 📄 product-client/product-client.module.ts   ── (Day 3) "client của product-service":
    │           ├─ imports: [ AuthClientModule ]  ← MƯỢN JwtAuthGuard cho POST /products
    │           ├─ ClientsModule.registerAsync([{ name: PRODUCT_CLIENT, GRPC, url :50052 }])
    │           │     └─ getProtoPath('product.proto') → tạo ClientGrpc (PRODUCT_CLIENT), lazy
    │           ├─ providers: 📄 product-client.service.ts (ProductClientService)
    │           └─ controllers: 📄 product-client/product.controller.ts (ProductController)
+   │
+   │     (2c) 📄 order-client/order-client.module.ts   ── MỚI (Day 4) "client của order-service":
+   │           ├─ imports: [ AuthClientModule ]  ← MƯỢN JwtAuthGuard (CẢ class /orders cần JWT)
+   │           ├─ ClientsModule.registerAsync([{ name: ORDER_CLIENT, GRPC, url :50053 }])
+   │           │     └─ getProtoPath('order.proto') → tạo ClientGrpc (ORDER_CLIENT), lazy
+   │           ├─ providers: 📄 order-client.service.ts (OrderClientService)
+   │           └─ controllers: 📄 order-client/order.controller.ts (OrderController)
    │
    │     (3) controllers của AppModule:
    │           📄 health/health.controller.ts (HealthController)
@@ -175,10 +247,13 @@ Lệnh: dev `npm run start:dev` ; prod `node dist/main.js`. Bắt đầu từ `m
    │        📄 auth-client.service.ts → onModuleInit():
    │           this.authService = client.getService('AuthService')
    │           → tạo OBJECT PROXY (register/login/validateToken/refreshToken)
-   │        📄 product-client.service.ts → onModuleInit():        ← MỚI (Day 3)
+   │        📄 product-client.service.ts → onModuleInit():        ← (Day 3)
    │           this.productService = client.getService('ProductService')
    │           → tạo PROXY (create/findOne/findMany)
-   │        → cả 2 vẫn CHƯA gửi request nào; chỉ dựng sẵn "tay cầm" để gọi sau
+   │        📄 order-client.service.ts → onModuleInit():          ← MỚI (Day 4)
+   │           this.orderService = client.getService('OrderService')
+   │           → tạo PROXY (createOrder/findOne/findByUser)
+   │        → cả 3 vẫn CHƯA gửi request nào; chỉ dựng sẵn "tay cầm" để gọi sau
    │
    ├─[c] app.useGlobalPipes(new ValidationPipe({...}))
    │        → cài "bộ lọc" validate cho MỌI request tương lai (dựa trên DTO)
@@ -188,16 +263,17 @@ Lệnh: dev `npm run start:dev` ; prod `node dist/main.js`. Bắt đầu từ `m
             GET  /health
             POST /auth/register , POST /auth/login , POST /auth/refresh
             GET  /auth/me   (có JwtAuthGuard)
-            GET  /products , GET /products/:id            ← MỚI (Day 3)
-            POST /products  (có JwtAuthGuard)             ← MỚI (Day 3)
+            GET  /products , GET /products/:id            ← (Day 3)
+            POST /products  (có JwtAuthGuard)             ← (Day 3)
+            POST /orders , GET /orders  (cả 2 có JwtAuthGuard)   ← MỚI (Day 4)
             (từ giờ gateway sẵn sàng nhận REST)
 ```
 
 **File chỉ chạy KHI CÓ REQUEST, không phải lúc boot:**
-- `dto/auth.dto.ts`, `product-client/dto/product.dto.ts` — khi request tới, `ValidationPipe` mới dùng để kiểm body/query.
-- `jwt-auth.guard.ts` — chỉ khi có request vào route được bảo vệ (`/auth/me`, `POST /products`).
+- `dto/auth.dto.ts`, `product-client/dto/product.dto.ts`, `order-client/dto/order.dto.ts` — khi request tới, `ValidationPipe` mới dùng để kiểm body/query.
+- `jwt-auth.guard.ts` — chỉ khi có request vào route được bảo vệ (`/auth/me`, `POST /products`, cả `/orders`).
 - `common/rpc-to-http.ts` — chỉ khi service trả lỗi.
-- Kết nối gRPC thật tới auth-service / product-service — chỉ xảy ra ở **request đầu tiên** tới mỗi service (lazy connect từ chỗ proxy).
+- Kết nối gRPC thật tới auth / product / order-service — chỉ xảy ra ở **request đầu tiên** tới mỗi service (lazy connect từ chỗ proxy). Lưu ý phân biệt: gRPC client của **gateway** nối lazy; còn kết nối **RabbitMQ** của order-service (publish) và notification-worker (consume) nối **ngay lúc boot** (Mục 1c/1d), không lazy.
 
 ---
 
@@ -221,28 +297,35 @@ t0  │ docker compose up -d
 t1  │ 🗄 postgres, 🔴 redis, 🐰 rabbitmq cùng start
     │   postgres: nếu volume mới → init-multiple-dbs.sh tạo auth_db/product_db/order_db
     │
-t2  │ compose CHỜ healthcheck: postgres "healthy", redis "healthy"
+t2  │ compose CHỜ healthcheck: postgres + redis + rabbitmq "healthy"
     │
-t3  │ 🟦 auth-service + 🟪 product-service start (song song, cùng chờ postgres healthy):
+t3  │ 🟦 auth-service + 🟪 product-service start (song song, chờ postgres healthy):
     │   auth-service:
-    │     main.ts → createMicroservice → app.module.ts
-    │       → ConfigModule → TypeORM connect auth_db + migration (tạo bảng users)
+    │     main.ts → createMicroservice → ConfigModule → TypeORM(auth_db)+migration(users)
     │       → JwtModule → RedisService connect Redis → AuthController(@GrpcMethod)
     │       → listen() bind :50051  ✅ auth-service READY
     │   product-service (Day 3):
-    │     main.ts → createMicroservice → app.module.ts
-    │       → ConfigModule → TypeORM connect product_db + migration (tạo bảng products)
+    │     main.ts → createMicroservice → ConfigModule → TypeORM(product_db)+migration(products)
     │       → ProductController(@GrpcMethod)  (KHÔNG Jwt/Redis)
-    │       → 🌱 OnApplicationBootstrap: bảng rỗng → seed 5 sản phẩm
+    │       → 🌱 SeedModule.OnApplicationBootstrap: seed 5 sản phẩm (idempotent)
     │       → listen() bind :50052  ✅ product-service READY
     │
-t3' │ 🟩 api-gateway start (song song, chờ auth-service + product-service "started"):
-    │     main.ts → create → app.module.ts
-    │       → ConfigModule → AuthClientModule + ProductClientModule (tạo proxy client, chưa nối)
-    │         → onModuleInit dựng 2 proxy → ValidationPipe → listen(3000)  ✅ gateway READY
+t3' │ 🟧 order-service start (Day 4 — chờ postgres + rabbitmq healthy):
+    │     main.ts → createMicroservice → ConfigModule → TypeORM(order_db)+migration(orders)
+    │       → ProductClientModule (proxy gRPC :50052, lazy)
+    │       → 🌱 MessagingModule.OnModuleInit: connect 🐰 rabbitmq + assertExchange('orders')
+    │       → OrderController(@GrpcMethod) → listen() bind :50053  ✅ order-service READY
+    │   🟨 notification-worker start (Day 4 — chờ rabbitmq healthy):
+    │     main.ts → createApplicationContext (không cổng) → ConfigModule
+    │       → 🌱 ConsumerService.OnApplicationBootstrap: connect 🐰 + assert exchange/queue/DLQ
+    │         + consume('notifications.order-created')  ✅ worker READY (nằm nghe)
     │
-t4  │ Tất cả READY. Client gọi curl :3000/... → giờ mới tới các flow ở day 2/day 3 mục 3.
-    │ (Request ĐẦU TIÊN từ gateway sang mỗi service mới thực sự mở kết nối gRPC.)
+t3''│ 🟩 api-gateway start (chờ auth + product "started"):
+    │     main.ts → create → ConfigModule → Auth/Product/OrderClientModule (proxy, chưa nối)
+    │       → onModuleInit dựng 3 proxy → ValidationPipe → listen(3000)  ✅ gateway READY
+    │
+t4  │ Tất cả READY. Client curl :3000/... → tới các flow ở day 2/3/4 mục 3.
+    │ (gRPC gateway→service nối ở request ĐẦU TIÊN; RabbitMQ đã nối sẵn từ t3'.)
 ```
 
 ---
@@ -252,14 +335,20 @@ t4  │ Tất cả READY. Client gọi curl :3000/... → giờ mới tới các
 ```bash
 # Xem log khởi động các service (thấy đúng thứ tự module init + dòng "successfully started")
 docker compose logs auth-service
-docker compose logs product-service      # Day 3 — tìm dòng "Đã seed 5 sản phẩm mẫu"
+docker compose logs product-service      # Day 3 — tìm dòng seed 'thêm 5, bỏ qua 0'
+docker compose logs order-service        # Day 4 — tìm "exchange 'orders' (topic) sẵn sàng"
+docker compose logs notification-worker  # Day 4 — tìm "Đang lắng nghe 'order.created'..."
 docker compose logs api-gateway
 
 # Theo dõi trực tiếp lúc bật lại 1 service để thấy nó init từng bước:
 docker compose restart auth-service && docker compose logs -f auth-service
 
-# Chứng minh seed idempotent: restart product-service, KHÔNG thấy lại dòng "Đã seed..."
+# Chứng minh seed idempotent: restart product-service → in 'thêm 0, bỏ qua 5'
 docker compose restart product-service && docker compose logs -f product-service
+
+# Day 4: xem RabbitMQ topology sau khi worker boot
+docker compose exec rabbitmq rabbitmqctl list_exchanges name type   # thấy 'orders', 'orders.dlx' (topic)
+docker compose exec rabbitmq rabbitmqctl list_queues name messages consumers  # 'notifications.order-created' + '...dlq'
 ```
 Trong log auth-service bạn sẽ thấy đúng thứ tự Nest in ra:
 `TypeOrmModule dependencies initialized` → `JwtModule ...` → `TypeOrmCoreModule ...` →

@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthClientModule } from './auth-client/auth-client.module';
 import { ProductClientModule } from './product-client/product-client.module';
+import { OrderClientModule } from './order-client/order-client.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -25,6 +26,7 @@ import { HealthController } from './health/health.controller';
     }),
     AuthClientModule,
     ProductClientModule,
+    OrderClientModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

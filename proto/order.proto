@@ -19,6 +19,9 @@ message OrderItem {
 message CreateOrderRequest {
   string user_id = 1;
   repeated OrderItemInput items = 2;
+  // email lấy từ JWT ở api-gateway, order-service đưa vào event "order.created"
+  // để notification-worker gửi mail xác nhận (order-service không truy cập auth_db).
+  string email = 3;
 }
 
 message OrderItemInput {

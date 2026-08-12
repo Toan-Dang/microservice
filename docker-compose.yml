@@ -134,6 +134,8 @@ services:
       RABBITMQ_URL: amqp://rabbitmq:5672
     volumes:
       - ./services/order-service:/app/services/order-service
+      # Giữ node_modules đã cài trong image, không bị bind-mount host che mất.
+      - /app/services/order-service/node_modules
       - ./proto:/app/proto
     depends_on:
       postgres:
@@ -155,6 +157,8 @@ services:
       SES_FROM_EMAIL: ${SES_FROM_EMAIL:-}
     volumes:
       - ./services/notification-worker:/app/services/notification-worker
+      # Giữ node_modules đã cài trong image, không bị bind-mount host che mất.
+      - /app/services/notification-worker/node_modules
       - ./proto:/app/proto
     depends_on:
       rabbitmq:
