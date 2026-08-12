@@ -42,6 +42,12 @@ export class OrderService {
         message: 'Thiếu userId',
       });
     }
+    if (!data.email) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Thiếu email',
+      });
+    }
 
     const orderItems: OrderItemData[] = [];
     let total = 0;

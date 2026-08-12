@@ -8,6 +8,7 @@ const GRPC_TO_HTTP: Record<number, HttpStatus> = {
   7: HttpStatus.FORBIDDEN, // PERMISSION_DENIED
   9: HttpStatus.CONFLICT, // FAILED_PRECONDITION (vd đặt hàng khi hết kho)
   16: HttpStatus.UNAUTHORIZED, // UNAUTHENTICATED
+  4: HttpStatus.GATEWAY_TIMEOUT, // DEADLINE_EXCEEDED
 };
 
 interface GrpcError {

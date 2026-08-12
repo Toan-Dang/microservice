@@ -126,6 +126,22 @@ describe('OrderService.create', () => {
     expect(checkStock).not.toHaveBeenCalled();
   });
 
+  it('ném INVALID_ARGUMENT khi email rỗng', async () => {
+    const repo = createOrderRepoMock();
+    const checkStock = jest.fn();
+    const { productClient, publisher } = makeDeps(checkStock);
+    const service = new OrderService(repo, productClient, publisher);
+
+    await expect(
+      service.create({
+        userId: 'u1',
+        email: '',
+        items: [{ productId: 'p1', quantity: 1 }],
+      }),
+    ).rejects.toBeInstanceOf(RpcException);
+    expect(checkStock).not.toHaveBeenCalled();
+  });
+
   it('ném INVALID_ARGUMENT khi quantity <= 0', async () => {
     const repo = createOrderRepoMock();
     const checkStock = jest.fn();

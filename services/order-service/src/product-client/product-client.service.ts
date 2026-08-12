@@ -1,6 +1,8 @@
+import { status } from '@grpc/grpc-js';
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
-import { ClientGrpc } from '@nestjs/microservices';
-import { firstValueFrom } from 'rxjs';
+import { ConfigService } from '@nestjs/config';
+import { ClientGrpc, RpcException } from '@nestjs/microservices';
+import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import {
   CheckStockResponse,
   PRODUCT_CLIENT,
@@ -12,7 +14,10 @@ import {
 export class ProductClientService implements OnModuleInit {
   private productService: ProductGrpcService;
 
-  constructor(@Inject(PRODUCT_CLIENT) private readonly client: ClientGrpc) {}
+  constructor(
+    @Inject(PRODUCT_CLIENT) private readonly client: ClientGrpc,
+    private readonly config: ConfigService,
+  ) {}
 
   onModuleInit() {
     this.productService =
@@ -20,9 +25,28 @@ export class ProductClientService implements OnModuleInit {
   }
 
   /** Gọi product-service.CheckStock (gRPC, sync) trước khi tạo đơn. */
-  checkStock(productId: string, quantity: number): Promise<CheckStockResponse> {
-    return firstValueFrom(
-      this.productService.checkStock({ productId, quantity }),
+  async checkStock(
+    productId: string,
+    quantity: number,
+  ): Promise<CheckStockResponse> {
+    const timeoutMs = this.config.get<number>(
+      'PRODUCT_GRPC_TIMEOUT_MS',
+      3000,
     );
+    try {
+      return await firstValueFrom(
+        this.productService
+          .checkStock({ productId, quantity })
+          .pipe(timeout(timeoutMs)),
+      );
+    } catch (error) {
+      if (error instanceof TimeoutError) {
+        throw new RpcException({
+          code: status.DEADLINE_EXCEEDED,
+          message: `product-service.CheckStock quá thời gian chờ (${timeoutMs}ms)`,
+        });
+      }
+      throw error;
+    }
   }
 }
