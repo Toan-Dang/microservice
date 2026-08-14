@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -6,6 +6,7 @@ import { AuthClientModule } from './auth-client/auth-client.module';
 import { ProductClientModule } from './product-client/product-client.module';
 import { OrderClientModule } from './order-client/order-client.module';
 import { HealthController } from './health/health.controller';
+import { LoggerMiddleware } from './common/logger.middleware';
 
 @Module({
   imports: [
@@ -31,4 +32,8 @@ import { HealthController } from './health/health.controller';
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(LoggerMiddleware).forRoutes('*');
+  }
+}

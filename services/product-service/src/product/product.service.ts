@@ -29,18 +29,21 @@ export class ProductService {
   async create(data: CreateProductRequest): Promise<ProductMessage> {
     const name = (data.name ?? '').trim();
     if (!name) {
+      this.logger.warn('Tạo sản phẩm thất bại: tên trống');
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
         message: 'Tên sản phẩm không được để trống',
       });
     }
     if (data.price === undefined || data.price < 0) {
+      this.logger.warn(`Tạo sản phẩm thất bại: giá không hợp lệ (${name})`);
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
         message: 'Giá sản phẩm phải >= 0',
       });
     }
     if (data.stock === undefined || data.stock < 0) {
+      this.logger.warn(`Tạo sản phẩm thất bại: tồn kho không hợp lệ (${name})`);
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
         message: 'Tồn kho phải >= 0',
@@ -50,12 +53,14 @@ export class ProductService {
     const saved = await this.products.save(
       this.products.create({ name, price: data.price, stock: data.stock }),
     );
+    this.logger.log(`Tạo sản phẩm mới: ${saved.name} (${saved.id})`);
     return this.toMessage(saved);
   }
 
   async findOne(id: string): Promise<ProductMessage> {
     const product = await this.products.findOne({ where: { id } });
     if (!product) {
+      this.logger.warn(`FindOne thất bại: sản phẩm ${id} không tồn tại`);
       throw new RpcException({
         code: status.NOT_FOUND,
         message: 'Sản phẩm không tồn tại',
@@ -97,6 +102,7 @@ export class ProductService {
   ): Promise<CheckStockResponse> {
     const product = await this.products.findOne({ where: { id: productId } });
     if (!product) {
+      this.logger.warn(`CheckStock thất bại: sản phẩm ${productId} không tồn tại`);
       throw new RpcException({
         code: status.NOT_FOUND,
         message: 'Sản phẩm không tồn tại',
@@ -136,11 +142,17 @@ export class ProductService {
         where: { id: productId },
       });
       if (!product) {
+        this.logger.warn(
+          `DecrementStock thất bại: sản phẩm ${productId} không tồn tại`,
+        );
         throw new RpcException({
           code: status.NOT_FOUND,
           message: 'Sản phẩm không tồn tại',
         });
       }
+      this.logger.warn(
+        `DecrementStock thất bại: ${productId} không đủ hàng (còn ${product.stock}, cần ${quantity})`,
+      );
       return { success: false, remaining: product.stock };
     }
 

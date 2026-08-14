@@ -29,9 +29,9 @@ Từ `note/day 1.md` → `day 4.md`, mục cuối mỗi file ("Gợi ý thực h
 
 **Thêm 2 bài KHÔNG có trong note (phát hiện lúc review, cần bổ sung):**
 
-- [ ] **Test reconnect**: `docker compose stop product-service`, gọi `/products` (lỗi) → `docker compose start product-service`, đợi vài giây, gọi lại → xem gateway tự phục hồi hay phải restart. Trả lời được câu phỏng vấn "tắt bật lại service thì client tự nối lại không?".
-- [ ] **Test timeout vừa vá**: tạm sửa `product.service.ts` thêm `await new Promise(r => setTimeout(r, 5000))` trước khi trả `checkStock`, rebuild, `POST /orders` → phải lỗi sau ~3s (không phải 5s) và trả 504. Xong nhớ xoá dòng sleep.
-- [ ] **Test race condition trừ kho** (sau khi vá mục 2): 2 terminal bắn `POST /orders` cùng lúc cho sản phẩm còn 1 cái → chỉ 1 đơn thành công, đơn kia 409, tồn kho không âm.
+- [x] **Test reconnect**: `docker compose stop product-service`, gọi `/products` (lỗi) → `docker compose start product-service`, đợi vài giây, gọi lại → xem gateway tự phục hồi hay phải restart. Trả lời được câu phỏng vấn "tắt bật lại service thì client tự nối lại không?". -> Có, tự phục hồi — không do code app tự viết retry, mà do gRPC channel tự quản lý kết nối (connectivity state machine với backoff tự động), kết hợp với việc gateway trỏ tới hostname (qua Docker DNS) chứ không phải IP cố định, nên khi service sống lại thì channel tự resolve và kết nối lại.
+- [x] **Test timeout vừa vá**: tạm sửa `product.service.ts` thêm `await new Promise(r => setTimeout(r, 5000))` trước khi trả `checkStock`, rebuild, `POST /orders` → phải lỗi sau ~3s (không phải 5s) và trả 504. Xong nhớ xoá dòng sleep.
+- [x] **Test race condition trừ kho** (sau khi vá mục 2): 2 terminal bắn `POST /orders` cùng lúc cho sản phẩm còn 1 cái → chỉ 1 đơn thành công, đơn kia 409, tồn kho không âm.
 
 ## 4. Sau khi thực hành xong mới tới
 

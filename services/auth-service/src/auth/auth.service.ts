@@ -1,6 +1,6 @@
 import { status } from '@grpc/grpc-js';
 import { randomUUID } from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { JwtSignOptions } from '@nestjs/jwt';
@@ -24,6 +24,7 @@ const SALT_ROUNDS = 10;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly accessTtl: string;
   private readonly refreshTtl: string;
 
@@ -45,6 +46,7 @@ export class AuthService {
       where: { email: normalizedEmail },
     });
     if (existing) {
+      this.logger.warn(`Đăng ký thất bại: email ${normalizedEmail} đã tồn tại`);
       throw new RpcException({
         code: status.ALREADY_EXISTS,
         message: 'Email đã được đăng ký',
@@ -56,6 +58,7 @@ export class AuthService {
       this.users.create({ email: normalizedEmail, passwordHash }),
     );
 
+    this.logger.log(`Đăng ký thành công: ${user.email} (${user.id})`);
     return this.issueTokens(user.id, user.email);
   }
 
@@ -72,12 +75,14 @@ export class AuthService {
       : false;
 
     if (!user || !passwordMatches) {
+      this.logger.warn(`Đăng nhập thất bại: ${normalizedEmail}`);
       throw new RpcException({
         code: status.UNAUTHENTICATED,
         message: 'Email hoặc mật khẩu không đúng',
       });
     }
 
+    this.logger.log(`Đăng nhập thành công: ${user.email} (${user.id})`);
     return this.issueTokens(user.id, user.email);
   }
 
@@ -98,6 +103,7 @@ export class AuthService {
     try {
       payload = await this.jwt.verifyAsync<JwtPayload>(refreshToken);
     } catch {
+      this.logger.warn('Refresh thất bại: token không hợp lệ hoặc đã hết hạn');
       throw new RpcException({
         code: status.UNAUTHENTICATED,
         message: 'Refresh token không hợp lệ hoặc đã hết hạn',
@@ -105,6 +111,9 @@ export class AuthService {
     }
 
     if (payload.type !== 'refresh') {
+      this.logger.warn(
+        `Refresh thất bại: token của ${payload.email} không phải refresh token`,
+      );
       throw new RpcException({
         code: status.UNAUTHENTICATED,
         message: 'Token không phải refresh token',
@@ -115,6 +124,7 @@ export class AuthService {
     // đã bị xoay vòng / thu hồi).
     const stored = await this.redis.get(this.refreshKey(payload.sub));
     if (!stored || stored !== refreshToken) {
+      this.logger.warn(`Refresh thất bại: token đã bị thu hồi (${payload.email})`);
       throw new RpcException({
         code: status.UNAUTHENTICATED,
         message: 'Refresh token đã bị thu hồi',
@@ -122,6 +132,7 @@ export class AuthService {
     }
 
     // Xoay vòng: phát cặp token mới và ghi đè bản lưu.
+    this.logger.log(`Refresh token: ${payload.email} (${payload.sub})`);
     return this.issueTokens(payload.sub, payload.email);
   }
 

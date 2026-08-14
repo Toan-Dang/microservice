@@ -27,18 +27,21 @@ export class OrderService {
   async create(data: CreateOrderRequest): Promise<OrderMessage> {
     const items = data.items ?? [];
     if (items.length === 0) {
+      this.logger.warn('Tạo đơn thất bại: đơn hàng rỗng');
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
         message: 'Đơn hàng phải có ít nhất 1 sản phẩm',
       });
     }
     if (!data.userId) {
+      this.logger.warn('Tạo đơn thất bại: thiếu userId');
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
         message: 'Thiếu userId',
       });
     }
     if (!data.email) {
+      this.logger.warn(`Tạo đơn thất bại: thiếu email (userId=${data.userId})`);
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
         message: 'Thiếu email',
@@ -51,6 +54,9 @@ export class OrderService {
     for (const item of items) {
       const quantity = item.quantity ?? 0;
       if (quantity <= 0) {
+        this.logger.warn(
+          `Tạo đơn thất bại: số lượng sản phẩm ${item.productId} không hợp lệ (${quantity})`,
+        );
         throw new RpcException({
           code: status.INVALID_ARGUMENT,
           message: `Số lượng của sản phẩm ${item.productId} phải > 0`,
@@ -63,6 +69,9 @@ export class OrderService {
         quantity,
       );
       if (!stock.available) {
+        this.logger.warn(
+          `Tạo đơn thất bại: sản phẩm ${item.productId} không đủ hàng (còn ${stock.remaining}, cần ${quantity})`,
+        );
         throw new RpcException({
           code: status.FAILED_PRECONDITION,
           message: `Sản phẩm ${item.productId} không đủ hàng (còn ${stock.remaining}, cần ${quantity})`,
@@ -90,6 +99,9 @@ export class OrderService {
         item.quantity,
       );
       if (!decremented.success) {
+        this.logger.warn(
+          `Tạo đơn thất bại: sản phẩm ${item.productId} vừa hết hàng lúc trừ kho (race với đơn khác)`,
+        );
         await this.rollbackDecrements(orderItems.slice(0, k));
         throw new RpcException({
           code: status.FAILED_PRECONDITION,
@@ -131,6 +143,7 @@ export class OrderService {
   async findOne(id: string): Promise<OrderMessage> {
     const order = await this.orders.findOne({ where: { id } });
     if (!order) {
+      this.logger.warn(`FindOne thất bại: đơn hàng ${id} không tồn tại`);
       throw new RpcException({
         code: status.NOT_FOUND,
         message: 'Đơn hàng không tồn tại',

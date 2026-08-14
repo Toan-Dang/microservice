@@ -2,6 +2,7 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Request } from 'express';
@@ -18,25 +19,39 @@ export interface AuthUser {
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor(private readonly authClientService: AuthClientService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     const token = this.extractToken(request);
     if (!token) {
+      this.logger.warn(`${request.method} ${request.originalUrl}: thiếu Bearer token`);
       throw new UnauthorizedException('Thiếu Bearer token');
     }
 
     let result: { valid: boolean; userId: string; email: string };
     try {
       result = await this.authClientService.validateToken(token);
-    } catch {
+    } catch (error) {
+      this.logger.error(
+        `${request.method} ${request.originalUrl}: gọi ValidateToken thất bại`,
+        error as Error,
+      );
       throw new UnauthorizedException('Không xác thực được token');
     }
 
     if (!result.valid) {
+      this.logger.warn(
+        `${request.method} ${request.originalUrl}: token không hợp lệ hoặc đã hết hạn`,
+      );
       throw new UnauthorizedException('Token không hợp lệ hoặc đã hết hạn');
     }
+
+    this.logger.log(
+      `${request.method} ${request.originalUrl}: token hợp lệ (userId=${result.userId}, email=${result.email})`,
+    );
 
     (request as Request & { user: AuthUser }).user = {
       userId: result.userId,
