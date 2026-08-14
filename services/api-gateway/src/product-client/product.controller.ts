@@ -7,6 +7,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth-client/jwt-auth.guard';
 import { rpcToHttp } from '../common/rpc-to-http';
 import { CreateProductDto, FindManyQueryDto } from './dto/product.dto';
@@ -15,10 +16,12 @@ import { ProductClientService } from './product-client.service';
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 
+@ApiTags('products')
 @Controller('products')
 export class ProductController {
   constructor(private readonly productClientService: ProductClientService) {}
 
+  @ApiOperation({ summary: 'Danh sách sản phẩm (phân trang)' })
   @Get()
   async list(@Query() query: FindManyQueryDto) {
     const page = query.page ?? DEFAULT_PAGE;
@@ -36,6 +39,7 @@ export class ProductController {
     }
   }
 
+  @ApiOperation({ summary: 'Chi tiết 1 sản phẩm theo ID' })
   @Get(':id')
   async getOne(@Param('id') id: string) {
     try {
@@ -45,6 +49,8 @@ export class ProductController {
     }
   }
 
+  @ApiOperation({ summary: 'Tạo sản phẩm mới' })
+  @ApiBearerAuth()
   @Post()
   @UseGuards(JwtAuthGuard)
   async create(@Body() dto: CreateProductDto) {

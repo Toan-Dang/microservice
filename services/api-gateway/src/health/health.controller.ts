@@ -1,8 +1,10 @@
 import { Controller, Get } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 
 // Miễn rate-limit: /health là endpoint hạ tầng (load balancer / uptime check
 // gọi liên tục), không phải nơi cần chặn bot.
+@ApiTags('health')
 @SkipThrottle()
 @Controller('health')
 export class HealthController {
