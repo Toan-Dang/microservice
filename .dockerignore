@@ -1,0 +1,45 @@
+# Build context là GỐC REPO (docker build -f services/<name>/Dockerfile .),
+# nên chỉ cần 1 file .dockerignore ở đây là đủ cho cả 5 service.
+#
+# QUAN TRỌNG — vì sao phải loại node_modules:
+# Dockerfile chạy `npm ci` (cài binary đúng cho alpine/musl) RỒI mới
+# `COPY ${SERVICE_DIR} ./${SERVICE_DIR}`. Nếu node_modules local lọt vào context,
+# nó sẽ ĐÈ LÊN kết quả npm ci bằng binary build cho máy dev (glibc/x86_64)
+# → native module (bcrypt) sai libc, và `npm prune --production` prune nhầm cây.
+
+# Dependency & build output — luôn dựng lại trong image
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+*.tsbuildinfo
+
+# Secret — tuyệt đối không đưa vào image
+.env
+.env.*
+!.env.example
+
+# Git & CI
+.git
+.gitignore
+.gitattributes
+.github
+
+# File chỉ dùng ở máy dev / tài liệu
+.claude
+note
+*.md
+!proto/**/*.md
+docker-compose.yml
+docker-compose.prod.yml
+infra
+cicd
+
+# Rác hệ điều hành & editor
+.DS_Store
+**/.DS_Store
+*.log
+.vscode
+.idea

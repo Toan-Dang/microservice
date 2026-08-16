@@ -24,11 +24,21 @@ services:
     command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
     mem_limit: 96m
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   rabbitmq:
     image: rabbitmq:3.13-alpine    # bản không-management để nhẹ RAM
     mem_limit: 192m
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api-gateway:
     image: ${ECR_REGISTRY}/api-gateway:${TAG:-latest}
@@ -44,7 +54,11 @@ services:
       - "80:3000"        # expose port 80 ra internet
     mem_limit: 128m
     restart: unless-stopped
-    depends_on: [auth-service, redis]
+    depends_on:
+      auth-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   auth-service:
     image: ${ECR_REGISTRY}/auth-service:${TAG:-latest}
@@ -58,7 +72,11 @@ services:
       REFRESH_EXPIRES_IN: 7d
     mem_limit: 128m
     restart: unless-stopped
-    depends_on: [postgres, redis]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   product-service:
     image: ${ECR_REGISTRY}/product-service:${TAG:-latest}
@@ -68,7 +86,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/product_db
     mem_limit: 128m
     restart: unless-stopped
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   order-service:
     image: ${ECR_REGISTRY}/order-service:${TAG:-latest}
@@ -80,7 +100,11 @@ services:
       RABBITMQ_URL: amqp://rabbitmq:5672
     mem_limit: 128m
     restart: unless-stopped
-    depends_on: [postgres, rabbitmq]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   notification-worker:
     image: ${ECR_REGISTRY}/notification-worker:${TAG:-latest}
@@ -91,7 +115,9 @@ services:
       SES_FROM_EMAIL: ${SES_FROM_EMAIL:-}
     mem_limit: 96m
     restart: unless-stopped
-    depends_on: [rabbitmq]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   pgdata:

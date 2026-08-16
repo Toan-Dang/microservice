@@ -5,7 +5,7 @@
 ARG SERVICE_DIR=services/product-service
 
 # ---------- base ----------
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 WORKDIR /app
 ARG SERVICE_DIR
 ENV SERVICE_DIR=${SERVICE_DIR}
@@ -29,7 +29,7 @@ COPY ${SERVICE_DIR} ./${SERVICE_DIR}
 RUN cd ${SERVICE_DIR} && npm run build && npm prune --production
 
 # ---------- production (image cuối, gọn nhẹ để tiết kiệm ECR + RAM) ----------
-FROM node:20-alpine AS production
+FROM node:24-alpine AS production
 WORKDIR /app
 ARG SERVICE_DIR
 ENV NODE_ENV=production

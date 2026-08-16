@@ -31,11 +31,22 @@ Luồng: push `main` → test 5 service (matrix) → build & push image lên ECR
 Luồng: GitHub (source) → **CodeBuild** (`buildspec.yml`: build & push 5 image) → **CodeDeploy** (`appspec.yml`: deploy lên EC2 qua agent).
 
 ### Chuẩn bị EC2 cho CodeDeploy
-CodeDeploy agent đã được cài trong `infra/ec2-userdata.sh`. Kiểm tra:
+CodeDeploy agent đã được cài trong `infra/ec2-userdata.sh` (bản **2.0.x**, tải từ prefix `latestv2/`
+— bản này không cần ruby; chỉ bản 1.8.x ở prefix `latest/` mới cần). Kiểm tra:
 ```bash
 sudo systemctl status codedeploy-agent
 ```
 EC2 cần **tag** để CodeDeploy nhận diện, ví dụ: `Name=ecommerce-prod`.
+
+> ⚠️ **Nếu bạn đã deploy tay bằng `infra/deploy-to-ec2.sh` trước đó**: CodeDeploy sẽ báo lỗi
+> *"The deployment failed because a specified file already exists at this location"* — nó từ chối
+> ghi đè file mà chính nó không cài. `appspec.yml` copy `docker-compose.prod.yml` và
+> `infra/init-multiple-dbs.sh` vào `/home/ec2-user/app`, đúng chỗ script tay đã đặt.
+> Xử lý trước lần deploy CodeDeploy đầu tiên:
+> ```bash
+> ssh ec2-user@<EC2_IP> 'cd ~/app && rm -f docker-compose.prod.yml infra/init-multiple-dbs.sh'
+> ```
+> **Giữ lại `~/app/.env`** — CodeDeploy không đụng tới nó, và stack cần nó để chạy.
 
 ### Bước làm
 1. **IAM roles:**
@@ -59,6 +70,14 @@ EC2 cần **tag** để CodeDeploy nhận diện, ví dụ: `Name=ecommerce-prod
 - CodePipeline: 1 pipeline **miễn phí/tháng**, sau đó $1/pipeline. Chỉ tạo 1.
 - CodeBuild: 100 phút build/tháng miễn phí. Build 5 image nhỏ nằm trong hạn mức nếu không chạy quá thường xuyên.
 - Xóa pipeline khi làm xong nếu không cần giữ.
+- Tài khoản tạo từ **15/07/2025** dùng Free Tier kiểu credit ($200 / 6 tháng), không phải hạn mức
+  riêng từng service — mọi phút CodeBuild/pipeline đều trừ chung vào credit. Xem `infra/AWS_SETUP.md` mục 0.
+
+> **Về vòng đời dịch vụ (cập nhật 08/2026):** CodeBuild / CodePipeline / CodeDeploy vẫn được AWS
+> phát triển bình thường. Đừng nhầm với **CodeCatalyst** (đóng với khách mới từ 07/11/2025) và
+> **AWS Proton** (ngừng hỗ trợ 07/10/2026) — AWS khuyến nghị chuyển sang đúng bộ CodeBuild/CodePipeline/CodeDeploy
+> đang dùng ở đây. CodeCommit từng đóng với khách mới (07/2024) nhưng đã **mở lại từ 11/2025**;
+> repo này dùng GitHub làm source nên không ảnh hưởng.
 
 ---
 

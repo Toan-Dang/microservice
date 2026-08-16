@@ -1,7 +1,7 @@
 # E-commerce Microservices — Dự án 1 tuần (NestJS + Docker + AWS)
 
 > Dự án tự học microservice, thiết kế để **xong trong 7 ngày** với sự hỗ trợ của **Claude Code CLI**,
-> deploy lên **AWS chi phí gần như $0** (EC2 free tier), có **CI/CD cả GitHub Actions lẫn AWS CodePipeline**.
+> deploy lên **AWS chi phí thấp nhất có thể** (1 EC2, mọi thứ chạy container), có **CI/CD cả GitHub Actions lẫn AWS CodePipeline**.
 
 **tách service, giao tiếp sync (gRPC) + async (RabbitMQ), chạy nhiều container, service discovery, và pipeline deploy multi-service**.
 
@@ -89,7 +89,7 @@ service có ranh giới rõ ràng, và bắt buộc phải có cả giao tiếp 
 - **Async:** RabbitMQ (`amqplib` / NestJS RMQ transport)
 - **DB:** PostgreSQL (TypeORM/Prisma), Redis (cache + refresh token)
 - **Container:** Docker + docker-compose (multi-stage build)
-- **Cloud:** AWS EC2 (t3.micro, free tier), ECR (chứa image), SES (email, optional)
+- **Cloud:** AWS EC2 (t3.micro), ECR (chứa image), SES (email, optional)
 - **CI/CD:** GitHub Actions (build/test/push ECR + SSH deploy) **và** AWS CodePipeline + CodeBuild + CodeDeploy
 - **Test:** Jest (unit + e2e) — bạn đã mạnh phần này, dùng để làm đầy pipeline
 
@@ -132,11 +132,12 @@ Mỗi ngày ~3-5 giờ. Cột "Prompt" trỏ tới bộ prompt sẵn trong `PROM
 - **Mục tiêu:** đặt hàng → thấy event chạy qua queue → worker nhận & xử lý.
 - **Prompt:** `PROMPTS.md` → Day 4
 
-### Ngày 5 — Deploy lên AWS EC2 (chi phí ~$0)
-- [ ] Tạo tài khoản/đăng nhập AWS, tạo **EC2 t3.micro** (free tier) — dùng `infra/ec2-userdata.sh`.
+### Ngày 5 — Deploy lên AWS EC2
+- [ ] Tạo AWS Budget $1 + đọc `infra/AWS_SETUP.md` mục 0 (Free Tier đã đổi từ 15/07/2025).
+- [ ] Tạo **EC2 t3.micro** — dùng `infra/ec2-userdata.sh`.
 - [ ] Tạo **ECR** repositories cho từng service.
-- [ ] Cấu hình security group (mở 22, 80/3000).
-- [ ] Copy `docker-compose.prod.yml` + `.env` lên EC2, `docker compose pull && up -d`.
+- [ ] Cấu hình security group (mở 22 cho IP của bạn, 80 cho public).
+- [ ] Deploy: `EC2_IP=... EC2_SSH_KEY=... ./infra/deploy-to-ec2.sh`.
 - [ ] Truy cập API public qua IP EC2.
 - **Mục tiêu:** hệ thống chạy trên internet.
 - **Prompt / hướng dẫn:** `infra/AWS_SETUP.md`
@@ -155,53 +156,73 @@ Mỗi ngày ~3-5 giờ. Cột "Prompt" trỏ tới bộ prompt sẵn trong `PROM
 - [ ] Thêm health check + graceful shutdown cho từng service.
 - [ ] Vẽ sơ đồ kiến trúc (dùng lại sơ đồ trong file này).
 - [ ] Viết đoạn mô tả để thêm vào CV/LinkedIn.
-- [ ] **Quan trọng: tắt/terminate EC2 khi không dùng để khỏi tốn tiền sau free tier.**
+- [ ] **Quan trọng: stop/terminate EC2 khi không dùng.** Tài khoản cũ: tránh vượt 750h/tháng.
+      Tài khoản tạo từ 15/07/2025: mỗi giờ chạy đều trừ vào $200 credit, và Free plan hết hạn sau
+      6 tháng thì **AWS đóng tài khoản** — quyết định upgrade lên Paid plan trước khi tới hạn.
 - **Prompt:** `PROMPTS.md` → Day 7
 
 ---
 
-## 5. Chi phí AWS — làm sao để gần như $0
+## 5. Chi phí AWS — làm sao để rẻ nhất
 
-| Hạng mục | Free tier (12 tháng đầu) | Sau free tier (ước tính) | Cách tiết kiệm |
+> ⚠️ **AWS đổi Free Tier từ 15/07/2025.** Quyền lợi phụ thuộc **ngày tạo tài khoản**:
+>
+> | | Tạo **trước** 15/07/2025 | Tạo **từ** 15/07/2025 |
+> |---|---|---|
+> | Thời hạn | 12 tháng | **6 tháng** hoặc hết credit |
+> | Hạn mức EC2 | 750 giờ/tháng miễn phí | **$100 credit** + tối đa $100 thưởng; **không có 750 giờ riêng**, giờ chạy trừ vào credit |
+> | Instance eligible | `t2.micro`, `t3.micro` | `t3.micro`, `t3.small`, `t4g.micro`, `t4g.small`, `c7i-flex.large`, `m7i-flex.large` |
+> | Hết hạn | Tính tiền pay-as-you-go | Còn ở Free plan ⇒ **AWS đóng tài khoản** (giữ data 90 ngày) |
+>
+> Tài khoản mới **không còn "$0 vô thời hạn"** — ngân sách thật là $200 credit / 6 tháng.
+> Chi tiết + cách kiểm tra tài khoản mình thuộc nhóm nào: `infra/AWS_SETUP.md` mục 0.
+
+| Hạng mục | Free tier | Ngoài free tier (ước tính) | Cách tiết kiệm |
 |---|---|---|---|
-| **EC2 t3.micro** | 750 giờ/tháng miễn phí | ~$7.5/tháng | Chạy 1 instance, **stop khi không demo** |
-| **EBS (ổ đĩa)** | 30 GB miễn phí | ~$0.08/GB | Dùng ~20GB |
-| **ECR** | 500 MB lưu trữ miễn phí | ~$0.10/GB | Xóa image cũ, chỉ giữ `latest` |
-| **Data transfer** | 100 GB out/tháng miễn phí | $0.09/GB | Demo nhỏ không lo |
-| **CodeBuild** | 100 phút build/tháng miễn phí | ~$0.005/phút | Build nhẹ |
+| **EC2 t3.micro** | 750 giờ/tháng (tk cũ) — hoặc trừ credit (tk mới) | ~$7.5/tháng | Chạy 1 instance, **stop khi không demo** |
+| **EBS (ổ đĩa)** | 30 GB | ~$0.08/GB | Dùng ~20GB |
+| **ECR** | 500 MB lưu trữ, 12 tháng | ~$0.10/GB | Lifecycle policy giữ ~3 image/repo |
+| **Data transfer** | 100 GB out/tháng | $0.09/GB | Demo nhỏ không lo |
+| **CodeBuild** | 100 phút build/tháng | ~$0.005/phút | Build nhẹ |
 | **CodePipeline** | 1 pipeline miễn phí/tháng | $1/pipeline active | Chỉ tạo 1 pipeline |
 | **SES** | 3.000 email/tháng (từ EC2) | $0.10/1000 email | Hoặc mock, không cần SES thật |
 | **RabbitMQ/Postgres/Redis** | Chạy **container trên EC2**, KHÔNG dùng RDS/MQ managed | — | Đây là mấu chốt tiết kiệm |
 
-**Nguyên tắc vàng để chi phí ~$0:**
+**Nguyên tắc vàng để chi phí thấp nhất:**
 1. **KHÔNG dùng RDS, ElastiCache, Amazon MQ, ECS Fargate** — tất cả chạy container trên chính EC2.
-2. Chỉ **1 EC2 t3.micro** (free tier). RAM 1GB hơi chật cho 5 service + 3 hạ tầng → xem mục tối ưu RAM bên dưới.
-3. **Stop EC2** khi không cần (chỉ tính tiền EBS ~vài cent/ngày).
-4. Đặt **billing alert $1** trong AWS Budgets ngay từ đầu.
-5. Xóa ECR image cũ định kỳ.
+2. Chỉ **1 EC2 t3.micro**. RAM 1GB hơi chật cho 5 service + 3 hạ tầng → xem mục tối ưu RAM bên dưới.
+3. **Stop EC2** khi không cần (chỉ tính tiền EBS ~vài cent/ngày). Với tài khoản mới, stop = ngừng đốt credit.
+4. Đặt **billing alert $1** trong AWS Budgets ngay từ đầu — tài khoản mới còn được $20 credit cho việc này.
+5. Xóa ECR image cũ định kỳ. Từ 01/2026 ECR dedupe layer trên toàn registry nên 5 service dùng chung
+   `node:24-alpine` chỉ tốn dung lượng base **1 lần**.
 
 ### Lưu ý RAM (t3.micro chỉ 1GB)
 5 service NestJS + Postgres + Redis + RabbitMQ có thể vượt 1GB. Cách xử lý:
 - Bật **swap 2GB** trên EC2 (đã có trong `ec2-userdata.sh`).
 - Giới hạn `mem_limit` cho từng container trong `docker-compose.prod.yml`.
-- Nếu vẫn chật: gộp notification-worker vào chung tiến trình, hoặc dùng **t3.small** (~$15/tháng, ngoài free tier) chỉ trong lúc demo rồi stop.
+- Nếu vẫn chật: gộp notification-worker vào chung tiến trình, hoặc dùng **t3.small** — với tài khoản
+  tạo từ 15/07/2025 thì t3.small **cũng free-tier eligible** (chỉ tốn credit nhanh hơn); tài khoản cũ
+  thì t3.small nằm ngoài free tier (~$15/tháng), chỉ bật lúc demo rồi stop.
+
+> `t4g.micro`/`t4g.small` rẻ hơn nhưng là **Graviton (arm64)** — phải build image `linux/arm64`
+> bằng `docker buildx`. Repo này mặc định x86_64, chọn t4g thì phải sửa cả CI.
 
 ---
 
 ## 6. Cách chạy local
 
-Cần cài trước (cả 2 hệ điều hành): **Docker** (chạy container), **Node 20** (để dev/test service), **Git**, và **Claude Code CLI** (để sinh code theo `PROMPTS.md`).
+Cần cài trước (cả 2 hệ điều hành): **Docker** (chạy container), **Node 24** (để dev/test service), **Git**, và **Claude Code CLI** (để sinh code theo `PROMPTS.md`).
 
 ### macOS
 
 1. Cài **Docker Desktop for Mac** (chọn đúng chip: Apple Silicon M1/M2/M3 hay Intel).
-2. Cài Node 20 + git — gợi ý dùng Homebrew:
+2. Cài Node 24 + git — gợi ý dùng Homebrew:
    ```bash
-   brew install node@20 git
+   brew install node@24 git
    ```
 3. Mở Terminal, `cd` vào thư mục dự án, chạy các bước chung bên dưới.
 
-> Trên Apple Silicon, các image trong dự án (`postgres`, `redis`, `rabbitmq`, `node:20-alpine`) đều có bản arm64 nên chạy native, không cần chỉnh gì.
+> Trên Apple Silicon, các image trong dự án (`postgres`, `redis`, `rabbitmq`, `node:24-alpine`) đều có bản arm64 nên chạy native, không cần chỉnh gì.
 
 ### Windows (dùng WSL2 — khuyến nghị)
 
@@ -209,10 +230,10 @@ Nên làm **bên trong WSL2 (Ubuntu)** để môi trường đồng nhất với
 
 1. Cài **WSL2 + Ubuntu**: mở PowerShell (admin) chạy `wsl --install -d Ubuntu`, khởi động lại máy.
 2. Cài **Docker Desktop for Windows**, bật backend WSL2 (Settings → General → *Use WSL 2 based engine*; và trong Resources → WSL Integration bật cho Ubuntu).
-3. Mở terminal **Ubuntu**, cài Node 20 + git:
+3. Mở terminal **Ubuntu**, cài Node 24 + git:
    ```bash
    sudo apt update && sudo apt install -y git
-   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs
+   curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt install -y nodejs
    ```
 4. Cài Claude Code CLI **bên trong WSL**, và đặt/clone dự án trong filesystem của WSL (ví dụ `~/projects/`), **KHÔNG** để ở `/mnt/c/...` — I/O của Docker nhanh hơn nhiều.
 5. `cd` vào thư mục dự án trong terminal Ubuntu, chạy các bước chung bên dưới.
@@ -271,7 +292,9 @@ nestjs-microservice/
 │   └── notification-worker/
 ├── infra/
 │   ├── AWS_SETUP.md
-│   └── ec2-userdata.sh
+│   ├── ec2-userdata.sh           # user-data khi tạo EC2 (docker, compose, CodeDeploy agent, swap)
+│   ├── deploy-to-ec2.sh          # deploy tay: scp config + login ECR + compose up
+│   └── init-multiple-dbs.sh
 └── cicd/
     ├── CICD_SETUP.md
     ├── github-actions/

@@ -2,15 +2,10 @@
   "name": "nestjs-microservice",
   "private": true,
   "version": "0.0.1",
-  "workspaces": [
-    "services/*"
-  ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
-  },
-  "devDependencies": {
-    "@types/jest": "^30.0.0"
+    "install:all": "for d in services/*/; do (cd \"$d\" && npm install); done",
+    "build": "for d in services/*/; do (cd \"$d\" && npm run build); done",
+    "test": "for d in services/*/; do (cd \"$d\" && npm test); done",
+    "lint": "for d in services/*/; do (cd \"$d\" && npm run lint --if-present); done"
   }
 }
