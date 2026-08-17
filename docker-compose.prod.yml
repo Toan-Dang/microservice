@@ -12,7 +12,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infra/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
-    mem_limit: 256m
+    mem_limit: 768m         # t3.medium (4GB) — xem COST_PLAN.md §3
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
@@ -22,7 +22,7 @@ services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
-    mem_limit: 96m
+    mem_limit: 128m
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -32,7 +32,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-alpine    # bản không-management để nhẹ RAM
-    mem_limit: 192m
+    mem_limit: 512m
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -52,7 +52,7 @@ services:
       REDIS_URL: redis://redis:6379
     ports:
       - "80:3000"        # expose port 80 ra internet
-    mem_limit: 128m
+    mem_limit: 320m
     restart: unless-stopped
     depends_on:
       auth-service:
@@ -70,7 +70,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 15m
       REFRESH_EXPIRES_IN: 7d
-    mem_limit: 128m
+    mem_limit: 288m
     restart: unless-stopped
     depends_on:
       postgres:
@@ -84,7 +84,7 @@ services:
       NODE_ENV: production
       GRPC_URL: 0.0.0.0:50052
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/product_db
-    mem_limit: 128m
+    mem_limit: 288m
     restart: unless-stopped
     depends_on:
       postgres:
@@ -98,7 +98,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/order_db
       PRODUCT_GRPC_URL: product-service:50052
       RABBITMQ_URL: amqp://rabbitmq:5672
-    mem_limit: 128m
+    mem_limit: 288m
     restart: unless-stopped
     depends_on:
       postgres:
@@ -113,7 +113,7 @@ services:
       RABBITMQ_URL: amqp://rabbitmq:5672
       AWS_REGION: ${AWS_REGION:-}
       SES_FROM_EMAIL: ${SES_FROM_EMAIL:-}
-    mem_limit: 96m
+    mem_limit: 256m
     restart: unless-stopped
     depends_on:
       rabbitmq:

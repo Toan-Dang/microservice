@@ -1,7 +1,11 @@
-# AWS Setup — Ngày 5 (Deploy chi phí thấp nhất có thể)
+# AWS Setup — Ngày 5 (Deploy 1 EC2, image ở ECR)
 
-> Mục tiêu: đưa hệ thống lên internet bằng **1 EC2 nhỏ**, image lưu ở **ECR**.
+> Mục tiêu: đưa hệ thống lên internet bằng **1 EC2 `t3.medium` (4 GB)**, image lưu ở **ECR**.
 > Không dùng RDS/ElastiCache/MQ/Fargate — tất cả chạy container trên chính EC2 để tiết kiệm tối đa.
+>
+> **Quyết định máy & chi phí đã chốt ở [`COST_PLAN.md`](./COST_PLAN.md) — đọc file đó trước.**
+> Tóm tắt: **t3.medium** (không phải t3.micro/small) vì cần ~2.5 GB headroom cho Phase 2 (OTel, Jaeger, k6).
+> Ngân sách là **credit $130**, dự phóng thực tế ~$25 cho 17 ngày → dùng credit thoải mái, không cần bóp máy.
 >
 > *Kiểm chứng lại với tài liệu AWS tháng 08/2026.*
 
@@ -18,8 +22,10 @@ quan trọng nhất so với mọi hướng dẫn cũ trên mạng:
 | Khi hết hạn | Chuyển sang tính tiền bình thường | Nếu vẫn ở **Free plan**: AWS **đóng tài khoản**, mất quyền truy cập tài nguyên (giữ dữ liệu 90 ngày để nâng cấp) |
 
 **Hệ quả thực tế cho bài này:**
-- Tài khoản mới ⇒ **không còn "$0 vô thời hạn"**. Ngân sách thật là $200 credit / 6 tháng.
-  Chạy 1 `t3.micro` 24/7 vẫn thoải mái trong 6 tháng, nhưng phải chủ động **stop instance** khi không demo.
+- Tài khoản mới ⇒ **không còn "$0 vô thời hạn"**. Ngân sách thật là credit / 6 tháng (xem `COST_PLAN.md`).
+- ⚠️ **`t3.medium` KHÔNG nằm trong danh sách free-tier eligible** (bảng trên chỉ có t3.micro/small, t4g.micro/small...).
+  Nghĩa là mọi giờ chạy t3.medium **trừ thẳng vào credit** ngay từ giờ đầu — không có "750h/tháng miễn phí".
+  Đây là lựa chọn **có chủ đích**: ~$21.5 credit cho 17 ngày để đổi lấy 4 GB RAM (t3.micro 1 GB không đủ chạy stack, xem `COST_PLAN.md` §2). Credit $130 dư sức gánh.
 - Muốn giữ tài khoản sau 6 tháng thì phải **upgrade lên Paid plan** (có thể upgrade bất cứ lúc nào trong 6 tháng, credit vẫn giữ).
 - $100 credit thưởng chia theo 5 nhiệm vụ onboarding ($20/nhiệm vụ) — một trong số đó là
   **tạo budget trong AWS Budgets**, tức là làm bước 0 bên dưới vừa an toàn vừa được credit.
@@ -31,9 +37,9 @@ aws ec2 describe-instance-types \
   --query "InstanceTypes[*].[InstanceType]" --output text | sort
 ```
 
-> ⚠️ `t4g.micro`/`t4g.small` là **Graviton (arm64)**. Nếu chọn t4g thì image Docker phải build cho
+> ⚠️ Các `t4g.*` là **Graviton (arm64)**. Nếu chọn t4g thì image Docker phải build cho
 > `linux/arm64` (`docker buildx build --platform linux/arm64`), không dùng được image x86 build sẵn.
-> Hướng dẫn này mặc định **t3.micro (x86_64)** để khỏi phải đụng tới buildx.
+> Hướng dẫn này dùng **t3.medium (x86_64)** để khỏi phải đụng tới buildx (xem `COST_PLAN.md` §2 vì sao không chọn t4g dù rẻ hơn ~20%).
 
 ## 1. Chặn hoá đơn bất ngờ (làm ĐẦU TIÊN)
 - **AWS Budgets** → tạo budget $1/tháng, bật email alert. Miễn phí, và với tài khoản mới còn được $20 credit.
@@ -61,12 +67,15 @@ Role cho EC2 gắn 2 policy:
 - (nếu dùng CodeDeploy) quyền đọc S3 artifact — thêm `AmazonS3ReadOnlyAccess` hoặc scoped hơn.
 
 ## 4. Tạo EC2
-- AMI: **Amazon Linux 2023**.
-- Type: **t3.micro** (xem bảng free tier ở mục 0 để chắc tài khoản bạn được loại nào).
+- AMI: **Amazon Linux 2023 (x86_64)**.
+- Type: **t3.medium** (2 vCPU, 4 GB) — xem `COST_PLAN.md` §2 vì sao không phải micro/small.
+- **Credit specification: `standard`** ← QUAN TRỌNG. T3 mặc định bật `unlimited`: khi hết CPU credit
+  (điển hình lúc chạy k6 load test ở Phase 2) AWS **tự charge thêm** ~$0.05/vCPU-h thay vì bóp CPU → dòng lạ trong bill.
+  Đặt `standard` lúc launch, hoặc sau: `aws ec2 modify-instance-credit-specification --cpu-credits standard`.
 - Key pair: tạo mới, tải file `.pem` (dùng cho SSH & GitHub Actions deploy).
 - **IAM instance profile**: chọn role ở bước 3.
 - **User data**: dán toàn bộ nội dung `infra/ec2-userdata.sh`.
-- Storage: 20 GB gp3.
+- Storage: **30 GB gp3** (3000 IOPS / 125 MB/s đã bao gồm, không cần mua thêm).
 - **Tag**: `Name=ecommerce-prod` (CodeDeploy dùng tag này).
 
 > AMI AL2023 bật **IMDSv2-only** mặc định (`imds-support=v2.0`). Mọi script đọc instance metadata
@@ -123,16 +132,26 @@ Phải dùng `seed:prod` (chạy `node dist/database/seeds/run-seed.js`), **khô
 script đó gọi `ts-node` trên `src/`, mà image production đã `npm prune --production` và không copy `src/`.
 Seeder idempotent theo key nghiệp vụ nên chạy lại nhiều lần vô hại.
 
-## 6. Tối ưu RAM (t3.micro chỉ 1GB)
-- Swap 2GB đã bật sẵn (trong user-data).
-- `mem_limit` từng container đã đặt trong `docker-compose.prod.yml`.
-- Theo dõi: `docker stats`. Nếu OOM-kill → cân nhắc gộp worker, hoặc tạm dùng `t3.small`
-  (với tài khoản tạo từ 15/07/2025 thì t3.small **cũng free-tier eligible**, chỉ tốn credit nhanh hơn).
+## 6. RAM trên t3.medium (4 GB)
+- Stack Phase 1 (3 hạ tầng + 5 Node) chiếm ~1–1.4 GB → còn ~2.5 GB headroom cho Phase 2. Dư thoải mái.
+- `mem_limit` từng container trong `docker-compose.prod.yml` đã chỉnh cho 4 GB (tổng ~2.85 GB, chừa ~1.15 GB
+  cho OS + docker + page cache Postgres). Bảng giá trị & lý do ở `COST_PLAN.md` §3 —
+  **đừng để nguyên giá trị cũ (đặt cho 1 GB) vì nó bóp `shared_buffers` của Postgres một cách vô ích.**
+- Swap 2 GB vẫn bật sẵn (user-data) làm đệm chống spike lúc `compose pull`, dù 4 GB gần như không chạm tới.
+- Theo dõi: `docker stats --no-stream` — cộng cột `MEM USAGE` để đối chiếu với bảng RAM trong `COST_PLAN.md` §2.
 
-## 7. Khi làm xong / không demo nữa (TIẾT KIỆM TIỀN)
+## 7. Quản lý chi phí
+
+**KHÔNG cần stop instance mỗi đêm.** Với ngân sách credit $130, t3.medium chạy 24/7 chỉ ~$1.27/ngày
+(xem `COST_PLAN.md` §5) và bạn giữ được URL sống để demo bất cứ lúc nào. Lời khuyên "stop khi không dùng"
+là cho tài khoản $0 kiểu cũ — không áp dụng ở đây. Chỉ stop/terminate khi **kết thúc hẳn** dự án.
+
+Khi kết thúc hẳn:
 - **Stop instance** (không terminate nếu còn muốn dùng lại) → chỉ tính EBS ~vài cent/ngày.
-  Với tài khoản mới, stop = ngừng đốt credit — việc này quan trọng hơn hẳn so với thời 750h/tháng.
-- Hoặc **terminate** + xóa ECR image nếu xong hẳn.
+- Hoặc **terminate** + **release Elastic IP** (IP mồ côi vẫn bị tính $0.005/h) + xoá ECR image nếu xong hẳn.
 - Xoá CodePipeline nếu không giữ (tránh $1/tháng).
 - Tài khoản Free plan sắp hết 6 tháng: quyết định **upgrade lên Paid** hay chấp nhận bị đóng tài khoản.
   Nếu muốn giữ repo demo sống, upgrade rồi stop hết tài nguyên là rẻ nhất.
+
+**Đặt AWS Budgets alert ở $40 / $70 / $100** (COST_PLAN §4.4). Chạm $70 khi chưa sang Phase 2 = có gì đó
+đang chạy ngoài ý muốn — nghi phạm số 1 là instance quên terminate + Elastic IP mồ côi.

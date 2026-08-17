@@ -1,6 +1,6 @@
 #!/bin/bash
 # EC2 user-data — dán vào ô "User data" khi tạo instance (Amazon Linux 2023).
-# Tự động: cài Docker, docker compose, CodeDeploy agent, tạo swap 2GB (quan trọng cho instance 1GB RAM).
+# Tự động: cài Docker, docker compose, CodeDeploy agent, tạo swap 2GB (đệm chống spike lúc compose pull; t3.medium 4GB gần như không chạm tới nhưng giữ cho an toàn).
 set -e
 
 # ---------- Swap 2GB (tránh out-of-memory khi chạy nhiều container) ----------
