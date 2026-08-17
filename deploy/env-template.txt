@@ -1,0 +1,75 @@
+# env-template.txt — Mọi biến môi trường cần cho ECS task definition (bậc 1, Fargate).
+#
+# Nguồn gốc: trích từ docker-compose.prod.yml, thay hostname container bằng ENDPOINT AWS.
+# Cách dùng: giá trị đánh dấu [SECRET] → tạo trong AWS Secrets Manager, task def tham chiếu qua ARN
+#            (KHÔNG để plaintext). Còn lại là plain env trong task def.
+#
+# Điền <...> sau khi provision RDS / ElastiCache / Amazon MQ ở Ngày 1.
+# ==============================================================================
+
+# ---------- ENDPOINT hạ tầng managed (điền sau khi tạo — Ngày 1.3) ----------
+RDS_HOST=<rds-endpoint>.xxxx.us-east-1.rds.amazonaws.com      # RDS Postgres, port 5432
+REDIS_HOST=<elasticache-endpoint>.xxxx.cache.amazonaws.com    # ElastiCache Redis, port 6379
+MQ_HOST=<broker-id>.mq.us-east-1.amazonaws.com                # Amazon MQ RabbitMQ, port 5671 (AMQPS!)
+
+# ---------- SECRET (→ Secrets Manager, KHÔNG commit giá trị thật) ----------
+# [SECRET] POSTGRES_USER
+# [SECRET] POSTGRES_PASSWORD
+# [SECRET] JWT_SECRET
+# [SECRET] MQ_USER
+# [SECRET] MQ_PASSWORD
+
+# ==============================================================================
+# GHI CHÚ QUAN TRỌNG (failure mode — xem §4 next-plan.md)
+# ==============================================================================
+# 1. RDS bắt SSL: nối Postgres phải kèm sslmode. DATABASE_URL thêm `?sslmode=no-verify`
+#    (learning) hoặc cấu hình TypeORM ssl.rejectUnauthorized=false. Thiếu → "no pg_hba.conf entry".
+# 2. Amazon MQ dùng AMQPS (TLS) cổng 5671, scheme `amqps://` — KHÁC compose local (amqp://:5672).
+# 3. database-per-service vẫn giữ: 1 RDS instance, 3 database auth_db/product_db/order_db.
+
+# ==============================================================================
+# BIẾN THEO TỪNG SERVICE (đưa vào ECS task definition tương ứng)
+# ==============================================================================
+
+# ---- api-gateway (REST :3000, gắn ALB) ----
+NODE_ENV=production
+PORT=3000
+AUTH_GRPC_URL=auth-service.microservice.local:50051       # Cloud Map DNS (Ngày 2.1)
+PRODUCT_GRPC_URL=product-service.microservice.local:50052
+ORDER_GRPC_URL=order-service.microservice.local:50053
+REDIS_URL=redis://${REDIS_HOST}:6379
+# JWT_SECRET  → [SECRET]
+# THROTTLE_TTL_MS / THROTTLE_LIMIT: để mặc định (20 req/10s/IP) hoặc override nếu muốn.
+
+# ---- auth-service (gRPC :50051) ----
+NODE_ENV=production
+GRPC_URL=0.0.0.0:50051                                     # nghe mọi interface, KHÔNG localhost
+DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${RDS_HOST}:5432/auth_db?sslmode=no-verify
+REDIS_URL=redis://${REDIS_HOST}:6379
+JWT_EXPIRES_IN=15m
+REFRESH_EXPIRES_IN=7d
+# JWT_SECRET, POSTGRES_USER, POSTGRES_PASSWORD → [SECRET]
+# LƯU Ý: prod KHÔNG set SEED_ON_BOOT (seed chạy qua one-off task — Ngày 2.4)
+
+# ---- product-service (gRPC :50052) ----
+NODE_ENV=production
+GRPC_URL=0.0.0.0:50052
+DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${RDS_HOST}:5432/product_db?sslmode=no-verify
+# POSTGRES_USER, POSTGRES_PASSWORD → [SECRET]
+
+# ---- order-service (gRPC :50053) ----
+NODE_ENV=production
+GRPC_URL=0.0.0.0:50053
+DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${RDS_HOST}:5432/order_db?sslmode=no-verify
+PRODUCT_GRPC_URL=product-service.microservice.local:50052
+RABBITMQ_URL=amqps://${MQ_USER}:${MQ_PASSWORD}@${MQ_HOST}:5671    # AMQPS, cổng 5671
+PRODUCT_GRPC_TIMEOUT_MS=3000                                       # đã có ở code (checkStock deadline)
+# POSTGRES_USER, POSTGRES_PASSWORD, MQ_USER, MQ_PASSWORD → [SECRET]
+
+# ---- notification-worker (RMQ consumer, KHÔNG cổng) ----
+NODE_ENV=production
+RABBITMQ_URL=amqps://${MQ_USER}:${MQ_PASSWORD}@${MQ_HOST}:5671
+AWS_REGION=us-east-1
+SES_FROM_EMAIL=                                            # để trống = mock email; điền khi verify SES
+# MQ_USER, MQ_PASSWORD → [SECRET]
+# LƯU Ý: nếu gửi SES thật → cần TASK ROLE có quyền ses:SendEmail (khác execution role)
