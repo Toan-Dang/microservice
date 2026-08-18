@@ -1,0 +1,37 @@
+{
+  "family": "order-service",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/ecommerceTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/ecommerceTaskRole",
+  "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
+  "containerDefinitions": [
+    {
+      "name": "order-service",
+      "image": "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/order-service:${TAG}",
+      "essential": true,
+      "portMappings": [{ "containerPort": 50053, "protocol": "tcp" }],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "GRPC_URL", "value": "0.0.0.0:50053" },
+        { "name": "PRODUCT_GRPC_URL", "value": "product-service.microservice.local:50052" },
+        { "name": "PRODUCT_GRPC_TIMEOUT_MS", "value": "3000" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${ACCOUNT_ID}:secret:ecommerce/app-${SECRET_SUFFIX}:ORDER_DATABASE_URL::" },
+        { "name": "RABBITMQ_URL", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${ACCOUNT_ID}:secret:ecommerce/app-${SECRET_SUFFIX}:RABBITMQ_URL::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/order-service",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

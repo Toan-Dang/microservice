@@ -1,0 +1,72 @@
+# ============================================================================
+# BÀI BONUS (Ngày 11) — CỐ TÌNH LÀM SAI ĐỂ HIỂU VÌ SAO PRODUCTION KHÔNG LÀM
+# ============================================================================
+# ĐỪNG cho app thật dùng cái này. Nó tồn tại để bạn tự tay thấy stateful trên k8s vận hành
+# thế nào, rồi đối chiếu với RDS ở ../../common/03-stateful.md.
+#
+# Áp dụng:  kubectl apply -f 90-postgres-statefulset.yaml
+# Thí nghiệm nên làm (đây mới là phần học):
+#   1. kubectl exec -it postgres-0 -n ecommerce -- psql -U postgres -c "CREATE TABLE t(i int)"
+#   2. kubectl delete pod postgres-0 -n ecommerce      → pod mới, PVC cũ, DATA CÒN
+#   3. kubectl delete statefulset postgres -n ecommerce → PVC KHÔNG bị xoá theo (chủ ý của k8s)
+#   4. kubectl delete pvc data-postgres-0 -n ecommerce  → EBS volume mất, DATA MẤT VĨNH VIỄN
+#   5. Thử scale replicas=2 → 2 Postgres độc lập, KHÔNG tự replicate. StatefulSet chỉ cho
+#      identity ổn định + storage riêng, nó KHÔNG biết gì về replication của Postgres.
+#
+# Kết luận rút ra (câu trả lời phỏng vấn): StatefulSet giải quyết được identity/storage,
+# nhưng KHÔNG giải quyết backup, failover, point-in-time recovery, minor version upgrade,
+# connection pooling, parameter tuning — đó là toàn bộ giá trị bạn trả tiền cho RDS.
+# Cộng thêm: EBS gắn 1 AZ ⇒ node chết ở AZ khác thì pod Pending, không schedule được.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ecommerce
+spec:
+  clusterIP: None            # headless: mỗi pod có DNS riêng postgres-0.postgres.ecommerce.svc
+  selector: { app: postgres }
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: ecommerce
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: app-secret, key: JWT_SECRET } }   # bài tập thôi, đừng bắt chước
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata    # subdir: volume EBS có lost+found ở root
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+  # volumeClaimTemplates: mỗi replica được cấp 1 PVC RIÊNG, tên data-postgres-<ordinal>.
+  # PVC này KHÔNG bị xoá khi xoá StatefulSet — chủ ý của k8s để tránh mất data do lỡ tay.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]     # EBS chỉ gắn được 1 node tại 1 thời điểm
+        storageClassName: gp2              # EBS CSI driver đã bật trong cluster.yaml
+        resources:
+          requests:
+            storage: 5Gi

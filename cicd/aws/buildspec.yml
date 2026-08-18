@@ -1,25 +1,41 @@
-# buildspec.yml — dùng bởi AWS CodeBuild (route CI/CD trên AWS).
-# Đặt ở gốc repo. CodeBuild build cả 5 image, push lên ECR, xuất artifact cho CodeDeploy.
+# buildspec.yml — CodeBuild, route CI/CD "native AWS" (thay cho GitHub Actions).
+# Dùng cho CẢ 2 BẬC: build & push 5 image, rồi deploy theo DEPLOY_TARGET.
+#
+# Cấu hình trong CodeBuild project:
+#   Environment variables: AWS_REGION, DEPLOY_TARGET (= ecs | eks | none)
+#   Privileged = ON  (bắt buộc để chạy docker build)
+#   Service role: cần quyền ECR push, ECS update-service (bậc 1), eks:DescribeCluster (bậc 2)
 
 version: 0.2
 
 env:
   variables:
-    AWS_REGION: ap-southeast-1
-  # ACCOUNT_ID và ECR_REGISTRY nên set trong project CodeBuild (Environment variables)
+    AWS_REGION: us-east-1
+    CLUSTER: ecommerce
+    DEPLOY_TARGET: ecs        # ecs | eks | none
 
 phases:
+  install:
+    commands:
+      # jq cần cho deploy-ecs.sh; kubectl chỉ cài khi target là eks
+      - command -v jq >/dev/null || (apt-get update -qq && apt-get install -y -qq jq)
+      - |
+        if [ "$DEPLOY_TARGET" = "eks" ]; then
+          curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          install -m 0755 kubectl /usr/local/bin/kubectl
+        fi
+
   pre_build:
     commands:
-      - echo Logging in to Amazon ECR...
       - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
       - ECR_REGISTRY=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
       - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
-      - TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      # CODEBUILD_RESOLVED_SOURCE_VERSION = full SHA; cắt 7 ký tự cho khớp `git rev-parse --short`
+      - TAG=$(echo "${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}" | cut -c1-7)
+      - echo "Deploy target=$DEPLOY_TARGET tag=$TAG"
 
   build:
     commands:
-      - echo Building all services...
       - |
         for SERVICE in api-gateway auth-service product-service order-service notification-worker; do
           echo "==> $SERVICE"
@@ -35,17 +51,19 @@ phases:
 
   post_build:
     commands:
-      - echo Preparing deploy artifacts...
-      # ghi ECR_REGISTRY vào file .env để CodeDeploy dùng
-      - echo "ECR_REGISTRY=$ECR_REGISTRY" > deploy.env
-      - echo "TAG=latest" >> deploy.env
-
-# artifact được đẩy tới CodeDeploy: gồm appspec, compose prod, scripts, deploy.env
-artifacts:
-  files:
-    - cicd/aws/appspec.yml
-    - docker-compose.prod.yml
-    - infra/init-multiple-dbs.sh
-    - cicd/aws/scripts/**/*
-    - deploy.env
-  discard-paths: no
+      - |
+        case "$DEPLOY_TARGET" in
+          ecs)
+            export TAG ACCOUNT_ID AWS_REGION CLUSTER
+            ./deploy/ecs/deploy-ecs.sh
+            aws ecs wait services-stable --cluster $CLUSTER --region $AWS_REGION \
+              --services api-gateway auth-service product-service order-service notification-worker
+            ;;
+          eks)
+            aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER
+            export TAG ACCOUNT_ID AWS_REGION
+            ./deploy/eks/deploy-eks.sh
+            ;;
+          *)
+            echo "DEPLOY_TARGET=$DEPLOY_TARGET → chỉ build & push, không deploy" ;;
+        esac

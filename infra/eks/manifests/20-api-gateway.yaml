@@ -1,0 +1,58 @@
+# api-gateway — điểm vào REST DUY NHẤT. Service duy nhất được Ingress trỏ tới.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: ecommerce
+spec:
+  replicas: 2          # 2 replica để thấy rolling update thật sự không downtime (Ngày 9)
+  selector:
+    matchLabels: { app: api-gateway }
+  template:
+    metadata:
+      labels: { app: api-gateway }
+    spec:
+      containers:
+        - name: api-gateway
+          image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/api-gateway:${TAG}
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: app-secret, key: JWT_SECRET } }
+          envFrom:
+            - configMapRef: { name: app-config }
+          resources:
+            requests: { cpu: "100m", memory: "192Mi" }
+            limits:   { cpu: "500m", memory: "384Mi" }
+          # readiness: chưa sẵn sàng → bị rút khỏi Service/target group, KHÔNG bị giết.
+          # liveness:  fail liên tục → pod BỊ GIẾT và tạo lại.
+          # Đây là cặp mà bậc 1 gộp làm một (ALB health check + grace period).
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            initialDelaySeconds: 40      # tương đương healthCheckGracePeriodSeconds=90 ở ECS
+            periodSeconds: 20
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: ecommerce
+spec:
+  # NodePort (không phải ClusterIP) vì AWS Load Balancer Controller ở chế độ instance mode
+  # cần NodePort. Nếu dùng ip mode (annotation target-type: ip) thì ClusterIP là đủ —
+  # Ingress ở đây dùng ip mode, nhưng để NodePort cho linh hoạt cả hai.
+  type: NodePort
+  selector: { app: api-gateway }
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

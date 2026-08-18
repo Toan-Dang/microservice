@@ -90,7 +90,7 @@ Chạy build + test. Demo: đăng nhập -> tạo order -> xem log worker nhận
 ---
 
 ## DAY 5 — Deploy AWS
-Không cần Claude Code nhiều. Làm theo `infra/AWS_SETUP.md`. Có thể nhờ Claude Code:
+Không cần Claude Code nhiều. Làm theo `infra/README.md` (ECS Fargate → EKS; bản EC2 cũ ở `infra/legacy-ec2/AWS_SETUP.md`). Có thể nhờ Claude Code:
 ```
 Viết script scp copy docker-compose.prod.yml, infra/init-multiple-dbs.sh và .env lên EC2 host $EC2_IP,
 rồi SSH chạy docker login ECR + docker compose -f docker-compose.prod.yml up -d. Đọc tham số từ biến môi trường.
@@ -99,7 +99,7 @@ rồi SSH chạy docker login ECR + docker compose -f docker-compose.prod.yml up
 ---
 
 ## DAY 6 — CI/CD
-Làm theo `cicd/CICD_SETUP.md`. Nhờ Claude Code kiểm tra file:
+Làm theo `cicd/README.md`. Nhờ Claude Code kiểm tra file:
 ```
 Đọc cicd/github-actions/*.yml và cicd/aws/* . Kiểm tra tính đúng đắn, chỉ ra IAM permission còn thiếu,
 và điều chỉnh path nếu cấu trúc repo của tôi khác. Giải thích luồng chạy của mỗi pipeline.

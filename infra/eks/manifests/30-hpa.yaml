@@ -1,0 +1,26 @@
+# HorizontalPodAutoscaler — Ngày 9. Bậc 1 tương đương: ECS Service Auto Scaling.
+# Cần metrics-server (EKS KHÔNG cài sẵn):
+#   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+#   kubectl top pods -n ecommerce      # phải ra số, nếu "unknown" thì HPA sẽ không hoạt động
+#
+# ⚠️ HPA đọc CPU theo % của `resources.requests.cpu` — KHÔNG phải của limits, KHÔNG phải của node.
+#    Deployment thiếu requests ⇒ HPA báo <unknown> và không bao giờ scale. Đây là lỗi kinh điển.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway
+  namespace: ecommerce
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 2
+  maxReplicas: 5      # giữ thấp: mỗi pod thêm là tiền, và node group chỉ có 2 × t3.medium
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

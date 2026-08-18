@@ -1,0 +1,28 @@
+# ConfigMap — mọi giá trị KHÔNG bí mật. Đối chiếu bậc 1: đây là phần `environment` của task definition.
+#
+# Service discovery đổi từ Cloud Map (<svc>.microservice.local) sang CoreDNS
+# (<svc>.<namespace>.svc.cluster.local). Trong cùng namespace có thể viết tắt còn "<svc>:port",
+# nhưng ở đây ghi FQDN đầy đủ cho rõ ràng — và để thấy rõ điểm khác so với ECS.
+#
+# ⚠️ Điền REDIS_HOST thật (endpoint ElastiCache) trước khi apply.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: ecommerce
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+
+  AUTH_GRPC_URL:    "auth-service.ecommerce.svc.cluster.local:50051"
+  PRODUCT_GRPC_URL: "product-service.ecommerce.svc.cluster.local:50052"
+  ORDER_GRPC_URL:   "order-service.ecommerce.svc.cluster.local:50053"
+
+  REDIS_URL: "redis://REPLACE_ME.cache.amazonaws.com:6379"
+
+  JWT_EXPIRES_IN: "15m"
+  REFRESH_EXPIRES_IN: "7d"
+  PRODUCT_GRPC_TIMEOUT_MS: "3000"
+
+  AWS_REGION: "us-east-1"
+  SES_FROM_EMAIL: ""

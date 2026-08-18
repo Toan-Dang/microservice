@@ -1,0 +1,57 @@
+# product-service — gRPC :50052
+# Đối chiếu bậc 1: Deployment ≈ ECS task definition + service; Service ≈ Cloud Map service.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: product-service }
+  template:
+    metadata:
+      labels: { app: product-service }
+    spec:
+      containers:
+        - name: product-service
+          image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/product-service:${TAG}
+          ports:
+            - containerPort: 50052
+              name: grpc
+          env:
+            # 0.0.0.0 chứ KHÔNG phải localhost — bind localhost thì pod khác không gọi vào được.
+            - name: GRPC_URL
+              value: "0.0.0.0:50052"
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: app-secret, key: PRODUCT_DATABASE_URL } }
+          envFrom:
+            - configMapRef: { name: app-config }
+          # requests = phần scheduler ĐẶT CHỖ; limits = trần cứng.
+          # Đặt requests quá cao → pod Pending vì không node nào đủ chỗ (t3.medium chỉ ~3.5GB dùng được).
+          resources:
+            requests: { cpu: "100m", memory: "192Mi" }
+            limits:   { cpu: "500m", memory: "384Mi" }
+          # gRPC không nói HTTP/1.1 → httpGet probe sẽ luôn fail. Dùng tcpSocket.
+          readinessProbe:
+            tcpSocket: { port: 50052 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 50052 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector: { app: product-service }
+  ports:
+    - port: 50052
+      targetPort: 50052
+      name: grpc

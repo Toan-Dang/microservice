@@ -1,0 +1,60 @@
+# Job chạy migration — bậc 2 tương đương `ecs run-task` one-off của bậc 1.
+# Chạy:  kubectl apply -f 40-migration-job.yaml && kubectl logs -f job/migrate-auth -n ecommerce
+# Chạy lại: phải xoá job cũ trước (Job là immutable): kubectl delete job migrate-auth -n ecommerce
+#
+# ⚠️ KHÔNG dùng `npm run migration:run` — script đó gọi typeorm-ts-node-commonjs trên src/,
+#    mà image production đã npm prune --production và không copy src/ → "ts-node not found".
+#    Gọi thẳng CLI typeorm trên bản build (typeorm là dependency runtime nên có trong image).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-auth
+  namespace: ecommerce
+spec:
+  backoffLimit: 1          # migration fail thì dừng, đừng retry mù
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/auth-service:${TAG}
+          command: ["node", "node_modules/typeorm/cli.js", "migration:run", "-d", "dist/database/data-source.js"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: app-secret, key: AUTH_DATABASE_URL } }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-product
+  namespace: ecommerce
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/product-service:${TAG}
+          command: ["node", "node_modules/typeorm/cli.js", "migration:run", "-d", "dist/database/data-source.js"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: app-secret, key: PRODUCT_DATABASE_URL } }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-order
+  namespace: ecommerce
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/order-service:${TAG}
+          command: ["node", "node_modules/typeorm/cli.js", "migration:run", "-d", "dist/database/data-source.js"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: app-secret, key: ORDER_DATABASE_URL } }

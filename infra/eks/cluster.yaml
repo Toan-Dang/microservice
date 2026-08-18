@@ -1,0 +1,86 @@
+# cluster.yaml — eksctl config cho bậc 2 (Ngày 5).
+# Tạo:  eksctl create cluster -f infra/eks/cluster.yaml     (~15–20 phút, đi pha cà phê)
+# Xoá:  eksctl delete cluster -f infra/eks/cluster.yaml     (xoá Ingress TRƯỚC, xem COST_PLAN §4)
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: ecommerce
+  region: us-east-1
+  # ⚠️ PHẢI là phiên bản còn STANDARD SUPPORT, nếu không giá control plane nhảy từ
+  # $0.10/h lên $0.60/h (extended support) = $14.40/ngày thay vì $2.40/ngày.
+  # Tính tới 08/2026, standard support: 1.34, 1.35, 1.36 (1.33 đã hết 29/07/2026).
+  # Kiểm tra trước khi tạo:
+  #   aws eks describe-cluster-versions --region us-east-1 \
+  #     --query 'clusterVersions[].[clusterVersion,versionStatus,endOfStandardSupportDate]' --output table
+  version: "1.35"
+
+# Dùng lại DEFAULT VPC — cùng VPC với RDS/ElastiCache/Amazon MQ đã dựng ở bậc 1.
+# Nếu để eksctl tự tạo VPC mới thì pod không nói chuyện được với stateful (khác VPC),
+# phải VPC peering — vô ích cho learning và tốn thêm tiền.
+#
+# ⚠️ TRƯỚC KHI CHẠY, subnet phải được TAG (eksctl KHÔNG tự tag subnet của VPC có sẵn):
+#     kubernetes.io/role/elb = 1                  ← ALB Ingress Controller dùng để tìm subnet
+#     kubernetes.io/cluster/ecommerce = shared
+#   Thiếu tag `role/elb` ⇒ Ingress kẹt mãi ở ADDRESS <none> mà không báo lỗi rõ.
+#   Xem lệnh tag ở infra/eks/README.md §"Chuẩn bị subnet".
+#
+# ⚠️ Public subnet phải bật `MapPublicIpOnLaunch` (Auto-assign public IPv4). Managed node group
+#   KHÔNG tự gán public IP — thiếu thì node không ra được ECR ⇒ pod ImagePullBackOff.
+#   Default VPC bật sẵn; VPC tự tạo thì phải bật tay.
+#
+# Điền id thật trước khi chạy:  aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID
+#
+# KHÔNG khai `vpc.nat` ở đây: với VPC có sẵn, eksctl "will not create any routing tables or
+# other resources, such as internet/NAT gateways" — khai vào là thừa (và có bản eksctl từ chối).
+# Việc "không dùng NAT" ở bậc 2 đạt được bằng cách đặt node ở PUBLIC subnet (privateNetworking: false).
+vpc:
+  id: "vpc-REPLACE_ME"
+  subnets:
+    public:
+      us-east-1a: { id: "subnet-REPLACE_ME_A" }
+      us-east-1b: { id: "subnet-REPLACE_ME_B" }
+
+managedNodeGroups:
+  - name: ng-1
+    instanceType: t3.medium      # 2 vCPU / 4 GB — đủ cho 5 pod + addon (CoreDNS, kube-proxy, ALB controller)
+    desiredCapacity: 2
+    minSize: 0                   # min 0 để scale về 0 khi hết giờ học (xem COST_PLAN §4)
+    maxSize: 3
+    volumeSize: 20
+    privateNetworking: false     # public subnet → kéo ECR không cần NAT Gateway (~$1/ngày)
+    iam:
+      withAddonPolicies:
+        imageBuilder: true       # pull từ ECR
+        cloudWatch: true         # ghi log
+        autoScaler: true
+
+# OIDC provider: BẮT BUỘC cho IRSA (IAM Roles for Service Accounts).
+# IRSA chính là "task role" của thế giới k8s — pod tự lấy quyền AWS, không cần access key.
+iam:
+  withOIDC: true
+  serviceAccounts:
+    - metadata:
+        name: aws-load-balancer-controller
+        namespace: kube-system
+      wellKnownPolicies:
+        awsLoadBalancerController: true
+    - metadata:
+        name: notification-worker
+        namespace: ecommerce
+      attachPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: ["ses:SendEmail", "ses:SendRawEmail"]
+            Resource: "*"
+
+addons:
+  - name: vpc-cni
+  - name: coredns          # DNS nội bộ: <svc>.<ns>.svc.cluster.local — thay Cloud Map của bậc 1
+  - name: kube-proxy
+  - name: aws-ebs-csi-driver   # cần cho bài bonus StatefulSet + PVC (Ngày 11)
+
+cloudWatch:
+  clusterLogging:
+    enableTypes: ["api", "audit"]

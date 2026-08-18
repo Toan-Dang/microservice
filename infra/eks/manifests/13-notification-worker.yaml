@@ -1,0 +1,31 @@
+# notification-worker — consumer RabbitMQ, KHÔNG có port, KHÔNG có Service.
+# Không ai gọi vào nó; nó tự kéo message từ Amazon MQ. Đối chiếu bậc 1: task def không portMappings.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-worker
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: notification-worker }
+  template:
+    metadata:
+      labels: { app: notification-worker }
+    spec:
+      # ServiceAccount này gắn IRSA có quyền ses:SendEmail (khai trong cluster.yaml).
+      # IRSA = "task role" của k8s. Không cần access key trong pod.
+      serviceAccountName: notification-worker
+      containers:
+        - name: notification-worker
+          image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/notification-worker:${TAG}
+          env:
+            - name: RABBITMQ_URL
+              valueFrom: { secretKeyRef: { name: app-secret, key: RABBITMQ_URL } }
+          envFrom:
+            - configMapRef: { name: app-config }
+          resources:
+            requests: { cpu: "50m",  memory: "128Mi" }
+            limits:   { cpu: "300m", memory: "256Mi" }
+          # Không có port để probe. Muốn liveness thật thì phải thêm health endpoint vào worker —
+          # ghi lại như việc TODO, đừng bịa probe giả cho có.

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Deploy tay lên EC2 (Ngày 5) — copy config lên host rồi pull image từ ECR & up stack.
 # Dùng cho lần deploy đầu tiên / deploy thủ công. CI/CD (Route B) đi qua CodeDeploy hooks
-# ở cicd/aws/scripts/, KHÔNG dùng file này.
+# ở cicd/legacy-ec2/scripts/, KHÔNG dùng file này.
 #
-# Chạy:  EC2_IP=1.2.3.4 EC2_SSH_KEY=~/.ssh/ecommerce.pem ./infra/deploy-to-ec2.sh
+# Chạy:  EC2_IP=1.2.3.4 EC2_SSH_KEY=~/.ssh/ecommerce.pem ./infra/legacy-ec2/deploy-to-ec2.sh
 #
 # Tham số đọc từ biến môi trường:
 #   EC2_IP        (bắt buộc) IP/DNS public của EC2

@@ -74,7 +74,7 @@ Role cho EC2 gắn 2 policy:
   Đặt `standard` lúc launch, hoặc sau: `aws ec2 modify-instance-credit-specification --cpu-credits standard`.
 - Key pair: tạo mới, tải file `.pem` (dùng cho SSH & GitHub Actions deploy).
 - **IAM instance profile**: chọn role ở bước 3.
-- **User data**: dán toàn bộ nội dung `infra/ec2-userdata.sh`.
+- **User data**: dán toàn bộ nội dung `infra/legacy-ec2/ec2-userdata.sh`.
 - Storage: **30 GB gp3** (3000 IOPS / 125 MB/s đã bao gồm, không cần mua thêm).
 - **Tag**: `Name=ecommerce-prod` (CodeDeploy dùng tag này).
 
@@ -92,13 +92,13 @@ Role cho EC2 gắn 2 policy:
 
 ## 5. Deploy tay lần đầu (để kiểm chứng trước khi bật CI/CD)
 
-Dùng `infra/deploy-to-ec2.sh` — script tự copy config lên EC2 rồi login ECR & up stack:
+Dùng `infra/legacy-ec2/deploy-to-ec2.sh` — script tự copy config lên EC2 rồi login ECR & up stack:
 
 ```bash
 # .env local phải có POSTGRES_PASSWORD, JWT_SECRET, ECR_REGISTRY, AWS_REGION
 cp .env.example .env && nano .env
 
-EC2_IP=<EC2_IP> EC2_SSH_KEY=~/.ssh/key.pem ./infra/deploy-to-ec2.sh
+EC2_IP=<EC2_IP> EC2_SSH_KEY=~/.ssh/key.pem ./infra/legacy-ec2/deploy-to-ec2.sh
 ```
 
 Script làm 3 việc:
@@ -113,11 +113,11 @@ Tham số đọc từ env (thứ tự ưu tiên: env > `.env` > mặc định): 
 
 ```bash
 # deploy 1 tag cụ thể thay vì latest
-EC2_IP=<EC2_IP> EC2_SSH_KEY=~/.ssh/key.pem TAG=abc1234 ./infra/deploy-to-ec2.sh
+EC2_IP=<EC2_IP> EC2_SSH_KEY=~/.ssh/key.pem TAG=abc1234 ./infra/legacy-ec2/deploy-to-ec2.sh
 ```
 
 > `.env` chứa secret nên **không qua git** — script copy thẳng từ máy bạn lên EC2.
-> Khi bật CI/CD (Route B), CodeDeploy hooks ở `cicd/aws/scripts/` lo phần này, không dùng script trên.
+> Khi bật CI/CD (Route B), CodeDeploy hooks ở `cicd/legacy-ec2/scripts/` lo phần này, không dùng script trên.
 
 ### Seed dữ liệu trên prod
 `docker-compose.prod.yml` **không** set `SEED_ON_BOOT` (đúng chủ ý — prod không tự seed), nên

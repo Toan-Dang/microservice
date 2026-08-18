@@ -1,23 +1,42 @@
-# env-template.txt — Mọi biến môi trường cần cho ECS task definition (bậc 1, Fargate).
+# env-template.txt — Mọi biến môi trường của 5 service. Dùng cho CẢ 2 BẬC.
 #
 # Nguồn gốc: trích từ docker-compose.prod.yml, thay hostname container bằng ENDPOINT AWS.
-# Cách dùng: giá trị đánh dấu [SECRET] → tạo trong AWS Secrets Manager, task def tham chiếu qua ARN
-#            (KHÔNG để plaintext). Còn lại là plain env trong task def.
-#
 # Điền <...> sau khi provision RDS / ElastiCache / Amazon MQ ở Ngày 1.
+#
+# ------------------------------------------------------------------------------
+# BIẾN NÀY KHAI Ở ĐÂU?
+# ------------------------------------------------------------------------------
+#                     Bậc 1 (ECS Fargate)              Bậc 2 (EKS)
+#   không bí mật  →   taskdef `environment[]`           ConfigMap `app-config`
+#                     infra/ecs-fargate/taskdef/*.json  infra/eks/manifests/01-configmap.yaml
+#   [SECRET]      →   taskdef `secrets[].valueFrom`     Secret `app-secret`
+#                     (ARN Secrets Manager + exec role) (deploy/eks/create-secrets.sh)
+#
+#   Giá trị thì GIỐNG HỆT nhau ở 2 bậc — cùng RDS, cùng ElastiCache, cùng Amazon MQ.
+#   Chỉ khác 3 URL service discovery (xem mục dưới) và chỗ khai báo.
+#
+# ------------------------------------------------------------------------------
+# SERVICE DISCOVERY — điểm KHÁC duy nhất giữa 2 bậc
+# ------------------------------------------------------------------------------
+#   Bậc 1 (Cloud Map):  <svc>.microservice.local:<port>
+#   Bậc 2 (CoreDNS):    <svc>.ecommerce.svc.cluster.local:<port>
+#   → 3 biến bị ảnh hưởng: AUTH_GRPC_URL, PRODUCT_GRPC_URL, ORDER_GRPC_URL
+#   GRPC_URL (phía server) thì GIỐNG NHAU: luôn 0.0.0.0:<port>
 # ==============================================================================
 
 # ---------- ENDPOINT hạ tầng managed (điền sau khi tạo — Ngày 1.3) ----------
 RDS_HOST=<rds-endpoint>.xxxx.us-east-1.rds.amazonaws.com      # RDS Postgres, port 5432
-REDIS_HOST=<elasticache-endpoint>.xxxx.cache.amazonaws.com    # ElastiCache Redis, port 6379
-MQ_HOST=<broker-id>.mq.us-east-1.amazonaws.com                # Amazon MQ RabbitMQ, port 5671 (AMQPS!)
+REDIS_HOST=<elasticache-endpoint>.xxxx.cache.amazonaws.com    # ElastiCache Valkey, port 6379 (URL vẫn redis://)
+MQ_HOST=<broker-id>.mq.us-east-1.amazonaws.com                # Amazon MQ RabbitMQ 4.2, port 5671 (AMQPS!)
 
-# ---------- SECRET (→ Secrets Manager, KHÔNG commit giá trị thật) ----------
-# [SECRET] POSTGRES_USER
-# [SECRET] POSTGRES_PASSWORD
+# ---------- SECRET (→ Secrets Manager "ecommerce/app", KHÔNG commit giá trị thật) ----------
+# Lưu URL HOÀN CHỈNH thay vì user/pass rời: task definition ECS KHÔNG nội suy biến
+# (${A} trong environment là chuỗi literal), nên không ghép được user:pass@host/db tại chỗ.
 # [SECRET] JWT_SECRET
-# [SECRET] MQ_USER
-# [SECRET] MQ_PASSWORD
+# [SECRET] AUTH_DATABASE_URL      postgres://<user>:<pass>@${RDS_HOST}:5432/auth_db?sslmode=no-verify
+# [SECRET] PRODUCT_DATABASE_URL   postgres://<user>:<pass>@${RDS_HOST}:5432/product_db?sslmode=no-verify
+# [SECRET] ORDER_DATABASE_URL     postgres://<user>:<pass>@${RDS_HOST}:5432/order_db?sslmode=no-verify
+# [SECRET] RABBITMQ_URL           amqps://<user>:<pass>@${MQ_HOST}:5671
 
 # ==============================================================================
 # GHI CHÚ QUAN TRỌNG (failure mode — xem §4 next-plan.md)

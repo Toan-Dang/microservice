@@ -59,7 +59,7 @@ Instance type     t3.medium   (2 vCPU burstable, 4 GB)
 Credit spec       standard    ← QUAN TRỌNG, xem cảnh báo bên dưới
 Storage           30 GB gp3 (3000 IOPS / 125 MB/s đã bao gồm, không mua thêm)
 IAM profile       role có AmazonEC2ContainerRegistryReadOnly
-User data         infra/ec2-userdata.sh (giữ nguyên, swap 2 GB vẫn hữu ích làm đệm)
+User data         infra/legacy-ec2/ec2-userdata.sh (giữ nguyên, swap 2 GB vẫn hữu ích làm đệm)
 Security group    22 ← chỉ IP của bạn ; 80 ← 0.0.0.0/0 ; KHÔNG mở 5432/6379/5672/15672
 Region            ap-southeast-1 (Singapore)
 Tag               Name=ecommerce-prod

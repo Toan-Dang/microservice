@@ -132,23 +132,28 @@ Mỗi ngày ~3-5 giờ. Cột "Prompt" trỏ tới bộ prompt sẵn trong `PROM
 - **Mục tiêu:** đặt hàng → thấy event chạy qua queue → worker nhận & xử lý.
 - **Prompt:** `PROMPTS.md` → Day 4
 
-### Ngày 5 — Deploy lên AWS EC2
-- [ ] Tạo AWS Budget $1 + đọc `infra/AWS_SETUP.md` mục 0 (Free Tier đã đổi từ 15/07/2025).
-- [ ] Tạo **EC2 t3.micro** — dùng `infra/ec2-userdata.sh`.
-- [ ] Tạo **ECR** repositories cho từng service.
-- [ ] Cấu hình security group (mở 22 cho IP của bạn, 80 cho public).
-- [ ] Deploy: `EC2_IP=... EC2_SSH_KEY=... ./infra/deploy-to-ec2.sh`.
-- [ ] Truy cập API public qua IP EC2.
-- **Mục tiêu:** hệ thống chạy trên internet.
-- **Prompt / hướng dẫn:** `infra/AWS_SETUP.md`
+### Ngày 5+ — Deploy lên AWS ⚠️ ĐÃ PIVOT
 
-### Ngày 6 — CI/CD (GitHub Actions + AWS CodePipeline)
-- [ ] **GitHub Actions** (`.github/workflows/ci.yml`): lint + test + build image + push ECR.
-- [ ] **GitHub Actions** (`deploy.yml`): SSH vào EC2 → pull image → restart.
-- [ ] **AWS CodePipeline**: source GitHub → CodeBuild (`buildspec.yml`) → CodeDeploy (`appspec.yml`) lên EC2.
-- [ ] Push 1 commit → xem cả 2 pipeline chạy.
-- **Mục tiêu:** commit lên `main` → tự động deploy.
-- **Prompt / hướng dẫn:** `cicd/CICD_SETUP.md`
+> Kế hoạch cũ (1 EC2 + `docker-compose`) **đã thay** bằng **ECS Fargate → EKS**.
+> Kế hoạch mới: [`note/next-plan.md`](note/next-plan.md). Bản cũ giữ ở `infra/legacy-ec2/`.
+>
+> Lý do: budget không còn là ràng buộc ($190/15 ngày), mục tiêu chuyển sang học-để-phỏng-vấn
+> → deploy bằng orchestrator (thứ ngành thực sự dùng), không phải `docker-compose` trên 1 EC2.
+
+Mỗi bậc có **2 bản hướng dẫn**: `CONSOLE_GUIDE.md` (bấm chuột, dùng khi học lần đầu) và
+script CLI (dựng lại nhanh / cắm vào CI/CD).
+
+| Ngày | Việc | Hướng dẫn |
+|---|---|---|
+| 1 | Hạ tầng chung: SG, ECR, RDS, ElastiCache, Amazon MQ, Secrets Manager | [`infra/common/`](infra/common/) |
+| 2 | **Bậc 1 — ECS Fargate**: task def, Cloud Map, ALB, migration/seed | [`infra/ecs-fargate/`](infra/ecs-fargate/) |
+| 3 | **CI/CD** (Day 6 cũ): GitHub Actions OIDC → ECR → ECS | [`cicd/`](cicd/) |
+| 4 | Buffer / hardening ECS | — |
+| 5–11 | **Bậc 2 — EKS**: Deployment, Service, Ingress, probe, HPA, StatefulSet | [`infra/eks/`](infra/eks/) |
+| 12–15 | Buffer, so sánh ECS↔EKS cho phỏng vấn, teardown an toàn | [`infra/common/COST_PLAN.md`](infra/common/COST_PLAN.md) |
+
+**Day 7 (payment mock) ra khỏi đường găng AWS** — dev local bằng `docker-compose` bất cứ lúc nào,
+cân nhắc gộp thẳng vào phase 2 (transactional outbox).
 
 ### Ngày 7 — Payment mock, hoàn thiện, tài liệu, README cho recruiter
 - [ ] Thêm luồng payment mock (publish `payment.succeeded`).
@@ -175,7 +180,8 @@ Mỗi ngày ~3-5 giờ. Cột "Prompt" trỏ tới bộ prompt sẵn trong `PROM
 > | Hết hạn | Tính tiền pay-as-you-go | Còn ở Free plan ⇒ **AWS đóng tài khoản** (giữ data 90 ngày) |
 >
 > Tài khoản mới **không còn "$0 vô thời hạn"** — ngân sách thật là $200 credit / 6 tháng.
-> Chi tiết + cách kiểm tra tài khoản mình thuộc nhóm nào: `infra/AWS_SETUP.md` mục 0.
+> Chi tiết + cách kiểm tra tài khoản mình thuộc nhóm nào: `infra/legacy-ec2/AWS_SETUP.md` mục 0.
+> Ngân sách & teardown cho kế hoạch hiện tại: `infra/common/COST_PLAN.md`.
 
 | Hạng mục | Free tier | Ngoài free tier (ước tính) | Cách tiết kiệm |
 |---|---|---|---|
@@ -264,7 +270,7 @@ docker compose down          # dừng
 docker compose down -v       # dừng + xóa data (Postgres/Redis)
 ```
 
-RabbitMQ UI: http://localhost:15672 (guest/guest). Xem chi tiết từng bước trong `PROMPTS.md` (build bằng Claude Code CLI), `infra/AWS_SETUP.md` (deploy), `cicd/CICD_SETUP.md` (CI/CD).
+RabbitMQ UI: http://localhost:15672 (guest/guest). Xem chi tiết từng bước trong `PROMPTS.md` (build bằng Claude Code CLI), `infra/README.md` (deploy lên AWS: ECS Fargate → EKS), `cicd/README.md` (CI/CD).
 
 ---
 

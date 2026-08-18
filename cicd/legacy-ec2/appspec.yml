@@ -18,14 +18,14 @@ permissions:
 
 hooks:
   ApplicationStop:
-    - location: cicd/aws/scripts/stop.sh
+    - location: cicd/legacy-ec2/scripts/stop.sh
       timeout: 120
       runas: ec2-user
   AfterInstall:
-    - location: cicd/aws/scripts/install.sh
+    - location: cicd/legacy-ec2/scripts/install.sh
       timeout: 180
       runas: ec2-user
   ApplicationStart:
-    - location: cicd/aws/scripts/start.sh
+    - location: cicd/legacy-ec2/scripts/start.sh
       timeout: 300
       runas: ec2-user
