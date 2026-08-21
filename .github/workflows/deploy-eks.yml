@@ -1,0 +1,55 @@
+# .github/workflows/deploy-eks.yml
+# Bậc 2 — deploy lên EKS. Delta so với bậc 1 rất nhỏ: cùng CI build/push, chỉ đổi bước cuối
+# từ `aws ecs update-service` sang `kubectl set image`. Đó chính là điểm để nói khi phỏng vấn:
+# pipeline đa target, phần đắt (test + build + push) dùng chung.
+
+name: Deploy to EKS
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (git short SHA). Bỏ trống = SHA của commit hiện tại'
+        required: false
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER: ecommerce
+  NAMESPACE: ecommerce
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Sinh ~/.kube/config từ EKS API. IAM role của OIDC phải được map vào cluster
+      # (aws-auth ConfigMap hoặc EKS access entry) — nếu không sẽ lỗi
+      # "error: You must be logged in to the server (Unauthorized)". Xem cicd/README.md §OIDC.
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER
+
+      - name: Rolling update
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          export TAG="${TAG:-$(git rev-parse --short HEAD)}"
+          ./deploy/eks/deploy-eks.sh
+
+      # rollout status trong deploy-eks.sh đã fail job nếu treo. Bước này chỉ để lấy log
+      # phục vụ debug ngay trong Actions, không phải để đổi kết quả.
+      - name: Dump state on failure
+        if: failure()
+        run: |
+          kubectl get pods -n $NAMESPACE
+          kubectl get events -n $NAMESPACE --sort-by=.lastTimestamp | tail -30

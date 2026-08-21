@@ -1,0 +1,62 @@
+# .github/workflows/deploy-ecs.yml
+# Bậc 1 — deploy lên ECS Fargate. Được ci.yml gọi sau khi push image xong.
+#
+# Cách làm: lấy task def đang chạy → thay `image` sang tag SHA vừa build → register revision mới
+# → update-service. KHÔNG dùng `--force-new-deployment` với tag `latest`: cách đó không truy vết
+# được production đang chạy commit nào.
+
+name: Deploy to ECS Fargate
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (git short SHA). Bỏ trống = SHA của commit hiện tại'
+        required: false
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER: ecommerce
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 5
+      matrix:
+        service: [api-gateway, auth-service, product-service, order-service, notification-worker]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy ${{ matrix.service }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          export TAG="${TAG:-$(git rev-parse --short HEAD)}"
+          ./deploy/ecs/deploy-ecs.sh ${{ matrix.service }}
+
+  # Job riêng chờ TẤT CẢ service ổn định. Đặt chung trong matrix thì mỗi job chỉ chờ service
+  # của nó → workflow xanh trong khi service khác đang rollback.
+  wait-stable:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Wait for services stable
+        run: |
+          aws ecs wait services-stable --cluster $CLUSTER --region $AWS_REGION \
+            --services api-gateway auth-service product-service order-service notification-worker
+          echo "✅ Tất cả service đã ổn định"

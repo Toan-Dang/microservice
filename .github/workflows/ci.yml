@@ -1,0 +1,98 @@
+# .github/workflows/ci.yml
+# CI dùng chung cho CẢ 2 BẬC: test 5 service → build → push ECR.
+# Deploy tách riêng: deploy-ecs.yml (bậc 1) và deploy-eks.yml (bậc 2).
+#
+# Đặt file này vào .github/workflows/ci.yml.
+#
+# Phiên bản action (đối chiếu 08/2026): checkout v6 (v7 đã có, v6 là bản major ổn định đang dùng
+# rộng rãi), setup-node v6, configure-aws-credentials v6 (v6 yêu cầu runner >= 2.327.1 — runner
+# ubuntu-latest của GitHub đã vượt xa), amazon-ecr-login v2 (v2 là bản mới nhất, mask credential
+# mặc định). Ghim theo MAJOR để tự nhận patch bảo mật.
+
+name: CI - Test & Push to ECR
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+
+permissions:
+  id-token: write     # OIDC → assume IAM role, KHÔNG lưu access key trong GitHub
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false      # 1 service fail vẫn chạy nốt 4 cái kia → thấy hết lỗi trong 1 lần
+      matrix:
+        service: [api-gateway, auth-service, product-service, order-service, notification-worker]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+      - name: Install
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+      - name: Lint
+        working-directory: services/${{ matrix.service }}
+        run: npm run lint --if-present
+      - name: Test
+        working-directory: services/${{ matrix.service }}
+        run: npm test --if-present
+
+  build-push:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api-gateway, auth-service, product-service, order-service, notification-worker]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Build context là ROOT repo vì Dockerfile COPY cả proto/ lẫn services/<svc>/.
+      # runner ubuntu-latest là x86_64 → khớp Fargate/t3.* mà không cần --platform.
+      - name: Build & push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          docker build \
+            -f services/$SERVICE/Dockerfile \
+            --target production \
+            --build-arg SERVICE_DIR=services/$SERVICE \
+            -t $REGISTRY/$SERVICE:$SHA \
+            -t $REGISTRY/$SERVICE:latest .
+          docker push $REGISTRY/$SERVICE:$SHA
+          docker push $REGISTRY/$SERVICE:latest
+
+  # ---------------------------------------------------------------------------
+  # Chọn ĐÚNG MỘT target cho môi trường hiện tại. Ngày 3 dùng ECS; từ Ngày 10 đổi sang EKS
+  # (hoặc bật cả hai nếu muốn giữ 2 môi trường song song để so sánh).
+  # ---------------------------------------------------------------------------
+  deploy-ecs:
+    needs: build-push
+    uses: ./.github/workflows/deploy-ecs.yml
+    secrets: inherit
+
+  # deploy-eks:
+  #   needs: build-push
+  #   uses: ./.github/workflows/deploy-eks.yml
+  #   secrets: inherit
