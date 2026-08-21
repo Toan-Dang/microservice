@@ -9,6 +9,8 @@
 # đang chạy commit nào). Deploy theo SHA và register revision mới là cách audit được.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 AWS_REGION="${AWS_REGION:-us-east-1}"
 CLUSTER="${CLUSTER:-ecommerce}"
 TAG="${TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo latest)}"
@@ -19,6 +21,9 @@ SERVICES=("${@:-}")
 [ -n "${SERVICES[0]:-}" ] || SERVICES=(api-gateway auth-service product-service order-service notification-worker)
 
 command -v jq >/dev/null || { echo "✗ Cần jq"; exit 1; }
+
+# shellcheck source=deploy/ecs/lib.sh
+source "$SCRIPT_DIR/lib.sh"
 
 echo "▸ Cluster=$CLUSTER Tag=$TAG"
 
@@ -38,11 +43,13 @@ for svc in "${SERVICES[@]}"; do
         --cli-input-json "$NEW_TD" --query 'taskDefinition.revision' --output text)
   echo "▸ task def revision mới: $svc:$REV"
 
+  # Tên task def family và tên ECS service KHÔNG nhất thiết giống nhau (xem lib.sh).
+  SVC_NAME=$(ecs_service_name "$svc")
   aws ecs update-service --region "$AWS_REGION" --cluster "$CLUSTER" \
-    --service "$svc" --task-definition "$svc:$REV" >/dev/null
-  echo "▸ update-service đã gửi"
+    --service "$SVC_NAME" --task-definition "$svc:$REV" >/dev/null
+  echo "▸ update-service đã gửi → $SVC_NAME"
 done
 
 echo
 echo "Chờ rolling deploy ổn định (ECS dựng task mới rồi mới rút task cũ):"
-echo "  aws ecs wait services-stable --cluster $CLUSTER --region $AWS_REGION --services ${SERVICES[*]}"
+echo "  aws ecs wait services-stable --cluster $CLUSTER --region $AWS_REGION --services $(ecs_service_names "${SERVICES[@]}")"

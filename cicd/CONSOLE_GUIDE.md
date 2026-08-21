@@ -39,9 +39,13 @@ Phần Console ở đây chỉ là **tạo IAM role cho GitHub** — làm 1 lầ
 | Trusted entity type | **Web identity** |
 | Identity provider | `token.actions.githubusercontent.com` |
 | Audience | `sts.amazonaws.com` |
-| GitHub organization / repository / branch | user của bạn / tên repo / `main` |
+| GitHub organization / repository / branch | user của bạn / **tên repo** / `main` |
 
-Tạo xong → mở role → tab **Trust relationships** → **Edit trust policy**, xác nhận có dòng `sub`:
+> ⚠️ Ô **repository** chỉ điền **tên repo** (`microservice`), KHÔNG dán URL
+> `https://github.com/<user>/<repo>`. Dán URL thì AWS ghép thành
+> `repo:<user>/https://github.com/<user>/<repo>:ref:...` và mọi lần assume đều fail.
+
+Tạo xong → mở role → tab **Trust relationships** → **Edit trust policy**. Wizard sinh ra dạng `sub` cũ:
 
 ```json
 "StringLike": {
@@ -51,6 +55,61 @@ Tạo xong → mở role → tab **Trust relationships** → **Edit trust policy
 
 > ⚠️ Nếu chỗ này là `"sub": "*"` hoặc thiếu hẳn điều kiện `sub` thì **bất kỳ repo GitHub nào
 > trên thế giới** cũng assume được role của bạn. Đây là lỗi cấu hình OIDC phổ biến nhất.
+
+### ⚠️ Bẫy: immutable identifiers — dạng `sub` mới của GitHub
+
+Repo bật **immutable identifiers** thì token GitHub gửi lên có `sub` chèn thêm database ID của
+owner và của repo:
+
+```
+repo:<user>@<ownerId>/<repo>@<repoId>:ref:refs/heads/main
+```
+
+Dạng này **không khớp** policy wizard sinh ra ở trên → workflow fail với
+`Not authorized to perform sts:AssumeRoleWithWebIdentity`, retry 12 lần rồi bỏ cuộc — **dù A1/A2/A3
+làm đúng hết**. Đây là lỗi khớp điều kiện, không phải lỗi tạm thời, nên retry vô ích.
+
+Đừng tắt tính năng này ở GitHub — nó chính là thứ chống việc người khác đổi tên / chiếm repo cũ rồi
+assume role của bạn. Sửa trust policy cho khớp:
+
+**Lấy `sub` thật.** Thêm workflow tạm (`workflow_dispatch`, `permissions: id-token: write`), chạy tay:
+
+```bash
+TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+  "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+echo "$TOKEN" | cut -d. -f2 | python3 -c \
+  'import sys,base64,json; s=sys.stdin.read().strip(); s+="="*(-len(s)%4); print(json.dumps(json.loads(base64.urlsafe_b64decode(s)), indent=2))' \
+  | jq '{sub, aud, repository, ref, event_name}'
+```
+
+(In claim đã decode, KHÔNG in token. Xoá workflow này sau khi xong.)
+
+**Dán `sub` đó vào policy.** Console → IAM → Roles → role của bạn → **Trust relationships** →
+**Edit trust policy** → thay toàn bộ block `Condition`:
+
+```json
+"Condition": {
+  "StringEquals": {
+    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+    "token.actions.githubusercontent.com:sub": [
+      "repo:<user>@<ownerId>/<repo>@<repoId>:ref:refs/heads/main",
+      "repo:<user>/<repo>:ref:refs/heads/main"
+    ]
+  }
+}
+```
+
+→ **Update policy**. Có hiệu lực ngay, chỉ cần **Re-run** job đã fail, không phải push lại.
+
+Ghi chú về policy này:
+- Liệt kê **cả 2 dạng** `sub`: dạng ID là dạng đang dùng, dạng cũ để phòng khi setting đổi. Cả hai
+  đều khớp tuyệt đối nên không nới rộng quyền.
+- `StringLike` → `StringEquals`: hết wildcard rồi thì `StringLike` chỉ gây hiểu nhầm.
+- **KHÔNG** viết `repo:<user>@*/<repo>@*:ref:refs/heads/main`. Nó khớp với bất kỳ ai dựng được
+  owner/repo trùng tên — đúng bằng việc vứt bỏ cái mà immutable ID đang bảo vệ.
+- `sub` gắn cứng `ref:refs/heads/main`. Sau này deploy từ tag, từ PR, hay từ job có
+  `environment: production` thì `sub` đổi dạng (vd `:environment:production`) và fail y hệt →
+  thêm entry tương ứng vào list, đừng thay bằng `*`.
 
 Permissions → **Add permissions → Attach policies** → `AmazonEC2ContainerRegistryPowerUser`.
 
@@ -65,7 +124,7 @@ Rồi **Create inline policy** → JSON (thay `<ACCOUNT_ID>`):
       "Effect": "Allow",
       "Action": [
         "ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition",
-        "ecs:UpdateService", "ecs:DescribeServices"
+        "ecs:UpdateService", "ecs:DescribeServices", "ecs:ListServices"
       ],
       "Resource": "*"
     },
@@ -88,11 +147,40 @@ Rồi **Create inline policy** → JSON (thay `<ACCOUNT_ID>`):
 }
 ```
 
+> **`ecs:ListServices` để làm gì:** `deploy/ecs/lib.sh` tra tên ECS service thật từ cluster
+> (xem bẫy tên service ở A2b). Thiếu quyền này thì deploy fail với `AccessDeniedException` ngay
+> ở bước tra tên, trước cả khi gọi `update-service`.
+
 > **`iam:PassRole` là bẫy kinh điển của bậc 1.** `RegisterTaskDefinition` khai
 > `executionRoleArn`/`taskRoleArn` → IAM coi đó là "trao role cho service khác" và đòi quyền này.
 > Thiếu là fail với `AccessDeniedException` **không hề nhắc chữ PassRole** ở dòng đầu.
 
 Copy **Role ARN**.
+
+## A2b. Bẫy: tên ECS service ≠ tên task definition
+
+Tạo ECS service bằng **wizard Console** thì AWS tự gắn hậu tố ngẫu nhiên vào tên:
+
+| Task definition family | Tên ECS service Console tạo ra |
+|---|---|
+| `auth-service` | `auth-service-service-99jdlchp` |
+| `api-gateway` | `api-gateway-service-a0rwllrk` |
+
+`deploy-ecs.sh` register task def theo family (chạy được) rồi gọi `update-service --service auth-service`
+→ **`ServiceNotFoundException`**. Nhìn log rất dễ tưởng service chưa được tạo, trong khi nó đang chạy
+bình thường.
+
+**ECS không cho đổi tên service.** Hai đường:
+
+1. **Để script tự tra tên** (đang dùng). `deploy/ecs/lib.sh` liệt kê service trong cluster rồi khớp
+   `^<tên logic>(-service)?-[A-Za-z0-9]+$`. Khớp chính xác được ưu tiên, nên service tạo bằng
+   `infra/ecs-fargate/create-services.sh` (tên đã sạch) vẫn chạy y nguyên. Khớp 0 hoặc >1 thì script
+   **dừng** chứ không đoán — deploy nhầm service tệ hơn là fail.
+2. **Xoá và tạo lại đúng tên** bằng `infra/ecs-fargate/create-services.sh`. Sạch hơn nhưng phải đăng ký
+   lại target group của ALB và có downtime.
+
+> Dùng script `infra/ecs-fargate/create-services.sh` ngay từ đầu thì không dính bẫy này —
+> nó truyền `--service-name <svc>` nên tên khớp đúng family.
 
 ## A3. Bên GitHub
 
