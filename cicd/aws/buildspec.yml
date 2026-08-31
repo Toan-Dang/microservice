@@ -56,8 +56,9 @@ phases:
           ecs)
             export TAG ACCOUNT_ID AWS_REGION CLUSTER
             ./deploy/ecs/deploy-ecs.sh
-            aws ecs wait services-stable --cluster $CLUSTER --region $AWS_REGION \
-              --services api-gateway auth-service product-service order-service notification-worker
+            source ./deploy/ecs/lib.sh
+            NAMES=$(ecs_service_names api-gateway auth-service product-service order-service notification-worker)
+            aws ecs wait services-stable --cluster $CLUSTER --region $AWS_REGION --services $NAMES
             ;;
           eks)
             aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER

@@ -170,6 +170,11 @@ cân nhắc gộp thẳng vào phase 2 (transactional outbox).
 
 ## 5. Chi phí AWS — làm sao để rẻ nhất
 
+> ⛔ **Mục này mô tả kế hoạch 1-EC2 CŨ (đã pivot).** Cách "chạy mọi thứ container trên 1 EC2,
+> không dùng RDS/ElastiCache/MQ/Fargate" bên dưới thuộc kế hoạch cũ. Kế hoạch hiện hành là
+> **ECS Fargate → EKS + stateful managed**; ngân sách/teardown xem [`infra/common/COST_PLAN.md`](infra/common/COST_PLAN.md)
+> và [`note/next-plan.md`](note/next-plan.md). Bảng Free Tier ngay dưới (theo ngày tạo tài khoản) vẫn đúng và hữu ích.
+
 > ⚠️ **AWS đổi Free Tier từ 15/07/2025.** Quyền lợi phụ thuộc **ngày tạo tài khoản**:
 >
 > | | Tạo **trước** 15/07/2025 | Tạo **từ** 15/07/2025 |
@@ -247,7 +252,7 @@ Nên làm **bên trong WSL2 (Ubuntu)** để môi trường đồng nhất với
 Lưu ý Windows:
 - File `.sh` đã được ép **LF** qua `.gitattributes`, nên script mount vào container không bị lỗi CRLF.
 - Nếu lỡ chỉnh file `.sh` bằng editor Windows và bị CRLF: chạy `sed -i 's/\r$//' path/to/file.sh` trong WSL để sửa.
-- Các script `ec2-userdata.sh`, `init-multiple-dbs.sh`, script CodeDeploy chạy **trên EC2 (Linux)** — HĐH máy bạn không ảnh hưởng.
+- Các script `.sh` (`deploy/**`, `infra/**`) chạy **trên Linux** (container build, EKS node, hoặc runner CI) — HĐH máy bạn không ảnh hưởng.
 
 ### Các bước chung (macOS + Windows/WSL2)
 
@@ -282,37 +287,30 @@ nestjs-microservice/
 ├── CLAUDE.md                     # định hướng cho Claude Code CLI
 ├── PROMPTS.md                    # bộ prompt sẵn theo từng ngày
 ├── docker-compose.yml            # local dev
-├── docker-compose.prod.yml       # chạy trên EC2 (pull image từ ECR)
+├── docker-compose.prod.yml       # chạy image production (pull từ ECR)
 ├── .env.example
-├── proto/                        # protobuf dùng chung
-│   ├── auth.proto
-│   ├── product.proto
-│   └── order.proto
-├── services/
-│   ├── api-gateway/
-│   │   └── Dockerfile
-│   ├── auth-service/
-│   │   └── Dockerfile
-│   ├── product-service/
-│   ├── order-service/
-│   └── notification-worker/
-├── infra/
-│   ├── AWS_SETUP.md
-│   ├── ec2-userdata.sh           # user-data khi tạo EC2 (docker, compose, CodeDeploy agent, swap)
-│   ├── deploy-to-ec2.sh          # deploy tay: scp config + login ECR + compose up
+├── proto/                        # protobuf dùng chung: auth.proto, product.proto, order.proto
+├── services/                     # 5 service NestJS, mỗi service có Dockerfile riêng
+│   ├── api-gateway/  ├── auth-service/  ├── product-service/
+│   ├── order-service/  └── notification-worker/
+├── infra/                        # provision hạ tầng AWS theo bậc thang
+│   ├── README.md                 # bản đồ 2 bậc + trạng thái pivot
+│   ├── common/                   # SG, ECR, RDS, ElastiCache/Valkey, Amazon MQ, Secrets (dùng chung 2 bậc)
+│   ├── ecs-fargate/              # Bậc 1 — task def, Cloud Map, ALB (CONSOLE_GUIDE + README)
+│   ├── eks/                      # Bậc 2 — cluster.yaml, manifests/, CONSOLE_GUIDE + README
+│   ├── legacy-ec2/               # ⛔ kế hoạch 1-EC2 cũ (đã pivot, giữ tham chiếu)
 │   └── init-multiple-dbs.sh
-└── cicd/
-    ├── CICD_SETUP.md
-    ├── github-actions/
-    │   ├── ci.yml
-    │   └── deploy.yml
-    └── aws/
-        ├── buildspec.yml
-        ├── appspec.yml
-        └── scripts/
-            ├── install.sh
-            ├── start.sh
-            └── stop.sh
+├── deploy/                       # script deploy, gọi bởi CI/CD lẫn chạy tay
+│   ├── push-ecr.sh  ├── env-template.txt  ├── README.md
+│   ├── ecs/                      # deploy-ecs.sh, register-taskdefs.sh, lib.sh
+│   └── eks/                      # apply-manifests.sh, create-secrets.sh, deploy-eks.sh
+├── cicd/                         # CI/CD 2 route để học + để CV
+│   ├── README.md  ├── CONSOLE_GUIDE.md
+│   ├── github-actions/           # ci.yml, deploy-ecs.yml, deploy-eks.yml (copy vào .github/workflows/)
+│   ├── aws/                      # buildspec.yml (route CodePipeline/CodeBuild)
+│   └── legacy-ec2/               # ⛔ CI/CD SSH-lên-EC2 cũ
+├── note/                         # ghi chú học theo ngày + kế hoạch (next-plan.md, ecs-vs-eks.md...)
+└── .github/workflows/            # workflow ĐANG CHẠY (bản gốc; cicd/github-actions là template)
 ```
 
 > Các file NestJS bên trong mỗi service sẽ do **bạn + Claude Code CLI sinh ra** theo prompt từng ngày.

@@ -1,6 +1,6 @@
 # next-plan.md — Deploy lên AWS: ECS Fargate (2 ngày) → EKS (ngày 3–15)
 
-> **Pivot note.** File này thay thế kế hoạch cũ "Day 5 — deploy EC2" trong `next-steps.md §4`.
+> **Pivot note.** File này thay thế kế hoạch cũ "Day 5 — deploy EC2" (nay lưu ở `infra/legacy-ec2/`).
 > Lý do pivot: budget không còn là ràng buộc ($190 dùng trong 15 ngày trước khi account hết hạn),
 > mục tiêu chuyển sang **học để phỏng vấn/đi làm** → deploy bằng orchestrator (thứ ngành thực sự dùng),
 > không phải `docker-compose` trên 1 EC2 (setup hobby, học được ít).
@@ -31,7 +31,7 @@
 | ECS Fargate deploy (bậc 1) | ✅ | Ngày 1–2 (đường găng) |
 | **Day 6 — CI/CD** | ✅ (deploy target) | **KHÔNG là ngày riêng** — nối vào ECS ngay khi ECS chạy (ngày 3), rồi mở rộng sang EKS |
 | EKS (bậc 2) | ✅ | Ngày 5–11 |
-| **Day 7 — payment mock** | ❌ (logic nghiệp vụ, dev local bằng docker-compose) | **RA KHỎI đường găng AWS** — làm rải rác buổi tối / SAU khi account hết hạn, hoặc gộp vào phase 2 outbox (đúng như `next-steps.md §4` đã định) |
+| **Day 7 — payment mock** | ❌ (logic nghiệp vụ, dev local bằng docker-compose) | **RA KHỎI đường găng AWS** — làm rải rác buổi tối / SAU khi account hết hạn, hoặc gộp vào phase 2 outbox |
 
 - **Day 7** không tiêu account: phát triển local, không vội. Deploy nó lên cloud chỉ là lặp pattern "thêm 1 service" (~20 phút nếu account còn sống) — không đáng để chiếm ngày AWS quý giá.
 - **Day 6** làm **sớm** (ngay sau ECS) vì: (a) setup còn nóng trong đầu; (b) *de-risk* — nếu EKS trượt lịch, vẫn còn nguyên câu chuyện deploy + CI/CD hoàn chỉnh cho phỏng vấn; (c) mọi thay đổi về sau tự động deploy, đỡ thao tác tay.
@@ -115,7 +115,7 @@ Kiểu hiểu "tôi biết làm, và biết vì sao production không làm thế
 ### 1.3 Provision stateful (chạy song song trong lúc push image)
 - **RDS Postgres** (`db.t3.micro`, engine 16): tạo 1 instance, sau đó tạo 3 database `auth_db`/`product_db`/`order_db`.
   - Đặt trong `sg-data`. Bật SSL (mặc định).
-- **ElastiCache Redis** (`cache.t3.micro`, single node): tắt in-transit encryption cho đơn giản (dùng `redis://`).
+- **ElastiCache** (engine **Valkey** — tương thích Redis, `cache.t3.micro`, single node): tắt in-transit encryption cho đơn giản (dùng `redis://`).
 - **Amazon MQ** (engine RabbitMQ, `mq.t3.micro`, single-instance): tạo user/pass → endpoint dạng `amqps://...:5671`.
 
 ### 1.4 Secrets Manager
@@ -144,7 +144,7 @@ Kiểu hiểu "tôi biết làm, và biết vì sao production không làm thế
 ### 2.2 Task definition + ECS service cho 5 app (Claude gen JSON)
 - Mỗi service 1 task def (Fargate, 0.25 vCPU / 0.5 GB là đủ cho learning), env lấy từ `docker-compose.prod.yml`, secret từ Secrets Manager, log driver `awslogs` → CloudWatch.
 - Tạo 5 ECS service (`desiredCount: 1`), đặt `sg-app`, public subnet, assignPublicIp ENABLED.
-- **Thứ tự khởi động không quan trọng**: gRPC client của gateway nối *lười* (lazy, tới request đầu mới nối) — đã kiểm chứng ở `next-steps.md §3`.
+- **Thứ tự khởi động không quan trọng**: gRPC client của gateway nối *lười* (lazy, tới request đầu mới nối) — đã kiểm chứng khi chạy local.
 
 ### 2.3 ALB cho api-gateway (public)
 - ALB ở `sg-alb`, target group **port 3000**, health check path **`/health`** (đã có `health.controller.ts`, nhớ `@SkipThrottle()`).
@@ -167,7 +167,7 @@ Kiểu hiểu "tôi biết làm, và biết vì sao production không làm thế
 1. **RDS bắt SSL.** Postgres RDS thường force SSL → TypeORM cần bật `ssl` (vd `?sslmode=no-verify` hoặc `ssl: { rejectUnauthorized: false }` cho learning). Không bật → `connection terminated`/`no pg_hba.conf entry`.
 2. **Amazon MQ dùng AMQPS (TLS, port 5671), không phải 5672.** URL đổi sang `amqps://user:pass@xxx.mq.us-east-1.amazonaws.com:5671`. `amqplib` hỗ trợ nhưng phải đúng scheme, sai là `ECONNREFUSED`/handshake fail.
 3. **Image sai kiến trúc** (build trên Apple Silicon quên `--platform linux/amd64`) → task chết ngay với `exec format error`.
-4. **gRPC service discovery**: quên đăng ký Cloud Map hoặc SG chặn 50051–53 giữa task → gateway timeout `DEADLINE_EXCEEDED` → HTTP 504 (đã có timeout 3s ở `checkStock`).
+4. **gRPC service discovery**: quên đăng ký Cloud Map hoặc SG chặn 50051–53 giữa task → gateway timeout `DEADLINE_EXCEEDED` → HTTP 504 (checkStock có timeout mặc định 3s, cấu hình qua env `PRODUCT_GRPC_TIMEOUT_MS`).
 5. **Fargate task không kéo được ECR** (thiếu public IP ở public subnet, hoặc thiếu NAT ở private subnet) → task stuck `PENDING`→`STOPPED`, lỗi `CannotPullContainerError`.
 6. **Task role vs execution role** (dễ lẫn): *execution role* để ECS kéo image + đọc secret lúc khởi động; *task role* để code trong container gọi AWS SDK (SES). Gán nhầm → task không start hoặc SES `AccessDenied`.
 7. **Cold start / health check quá gấp**: NestJS boot vài giây; nếu ALB health check interval/threshold quá ngắt → ALB kill task trước khi sẵn sàng, loop mãi. Nới `healthCheckGracePeriodSeconds`.
@@ -195,7 +195,7 @@ Kiểu hiểu "tôi biết làm, và biết vì sao production không làm thế
 
 **Đọc bảng:** 🔴 (ngày 1–4) là tối thiểu phải xong — một hệ chạy được + CI/CD hoàn chỉnh, đủ kể chuyện phỏng vấn dù account chết sớm. 🟡 (5–10) là phần EKS giá trị cao. 🟢 là bonus. Người mới hay trượt lịch → buffer 12–15 là có chủ đích, đừng nhồi việc bắt buộc vào đó.
 
-**Day 7 (payment mock) — off-clock:** dev local bằng `docker-compose` bất cứ lúc nào (tối, cuối tuần, hoặc sau khi AWS hết hạn). Gần chắc lặp lại pattern dual-write của order → cân nhắc gộp thẳng vào **phase 2 (transactional outbox)** thay vì làm riêng, đúng như `next-steps.md §4`. Nếu bậc 2 xong sớm và account còn sống, deploy payment lên cloud chỉ là lặp pattern "thêm 1 service".
+**Day 7 (payment mock) — off-clock:** dev local bằng `docker-compose` bất cứ lúc nào (tối, cuối tuần, hoặc sau khi AWS hết hạn). Gần chắc lặp lại pattern dual-write của order → cân nhắc gộp thẳng vào **phase 2 (transactional outbox)** thay vì làm riêng. Nếu bậc 2 xong sớm và account còn sống, deploy payment lên cloud chỉ là lặp pattern "thêm 1 service".
 
 ---
 

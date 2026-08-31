@@ -51,12 +51,17 @@ jobs:
     needs: deploy
     runs-on: ubuntu-latest
     steps:
+      # Cần checkout để dùng deploy/ecs/lib.sh — tên ECS service thật không trùng tên task def.
+      - uses: actions/checkout@v6
+
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Wait for services stable
         run: |
-          aws ecs wait services-stable --cluster $CLUSTER --region $AWS_REGION \
-            --services api-gateway auth-service product-service order-service notification-worker
+          source ./deploy/ecs/lib.sh
+          NAMES=$(ecs_service_names api-gateway auth-service product-service order-service notification-worker)
+          echo "▸ Chờ: $NAMES"
+          aws ecs wait services-stable --cluster $CLUSTER --region $AWS_REGION --services $NAMES
           echo "✅ Tất cả service đã ổn định"

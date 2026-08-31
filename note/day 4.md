@@ -129,6 +129,14 @@ services/api-gateway/src/
 ║        │     ├─ available=false → RpcException FAILED_PRECONDITION (9)  ❌ DỪNG, KHÔNG lưu   ║
 ║        │     └─ available=true  → chốt price từ CheckStock, cộng vào total                  ║
 ║        │                                                                                     ║
+║        ├─ 🔁 VỚI MỖI item (lượt 2, tuần tự): decrementStock(productId, qty)                 ║
+║        │     └─► ═══gRPC═══► PROCESS 3: product-service.DecrementStock                      ║
+║        │           UPDATE product SET stock=stock-qty WHERE id=? AND stock>=qty  (ATOMIC)   ║
+║        │        ├─ affected=0 (hết hàng do RACE với đơn khác) → rollbackDecrements():        ║
+║        │        │     releaseStock() hoàn kho các item đã trừ → RpcException FAILED_PRECOND ❌║
+║        │        └─ affected=1 → tiếp item sau                                                ║
+║        │   ⚠️ CheckStock ở lượt 1 chỉ là SNAPSHOT; DecrementStock atomic mới CHẶN RACE thật ║
+║        │                                                                                     ║
 ║        ├─ this.orders.save({ userId, email, items(JSONB), total, status:'PENDING' })        ║
 ║        │        └─► INSERT ─► 🗄 order_db                                                    ║
 ║        │                                                                                     ║
@@ -147,7 +155,7 @@ services/api-gateway/src/
    Client nhận đơn NGAY, dù mail chưa gửi.
 ```
 
-> **Đây là bức tranh microservice đầy đủ nhất:** 1 request chạm **4 process** — gateway → auth (xác thực) → order (điều phối) → product (kiểm hàng) — cộng thêm **1 nhánh async** rẽ sang RabbitMQ → worker. So với Day 3 (`POST /products` chạm 3 process **toàn sync**), Day 4 là lần đầu có nhánh *không đồng bộ* tách khỏi đường trả về.
+> **Đây là bức tranh microservice đầy đủ nhất:** 1 request chạm **4 process** — gateway → auth (xác thực) → order (điều phối) → product (kiểm **và trừ kho atomic**) — cộng thêm **1 nhánh async** rẽ sang RabbitMQ → worker. So với Day 3 (`POST /products` chạm 3 process **toàn sync**), Day 4 là lần đầu có nhánh *không đồng bộ* tách khỏi đường trả về.
 
 ### 3.2. `GET /orders` — đơn của user hiện tại (cần JWT, thuần sync)
 
