@@ -65,15 +65,20 @@ iam:
         namespace: kube-system
       wellKnownPolicies:
         awsLoadBalancerController: true
-    - metadata:
-        name: notification-worker
-        namespace: ecommerce
-      attachPolicy:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Action: ["ses:SendEmail", "ses:SendRawEmail"]
-            Resource: "*"
+    # notification-worker: email đang MOCK → worker KHÔNG gọi AWS SDK → không cần IRSA.
+    # Manifest 13-notification-worker.yaml dùng SA `default`. Bỏ comment khối dưới CHỈ khi
+    # chuyển sang gửi SES thật (và nhớ thêm lại `serviceAccountName: notification-worker`
+    # trong manifest). Trước đây khối này bật sẵn nhưng đường Console không tạo SA →
+    # worker kẹt `FailedCreate: serviceaccount "notification-worker" not found`.
+    # - metadata:
+    #     name: notification-worker
+    #     namespace: ecommerce
+    #   attachPolicy:
+    #     Version: "2012-10-17"
+    #     Statement:
+    #       - Effect: Allow
+    #         Action: ["ses:SendEmail", "ses:SendRawEmail"]
+    #         Resource: "*"
 
 addons:
   - name: vpc-cni

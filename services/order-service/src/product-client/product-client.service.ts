@@ -32,7 +32,9 @@ export class ProductClientService implements OnModuleInit {
     productId: string,
     quantity: number,
   ): Promise<CheckStockResponse> {
-    const timeoutMs = this.config.get<number>('PRODUCT_GRPC_TIMEOUT_MS', 3000);
+    // Env từ ConfigMap luôn là STRING → phải ép về number. rxjs `timeout()` chỉ nhận number;
+    // truyền chuỗi "3000" nó tưởng là config object → "No timeout provided". `|| 3000` chặn cả NaN.
+    const timeoutMs = Number(this.config.get('PRODUCT_GRPC_TIMEOUT_MS', 3000)) || 3000;
     try {
       return await firstValueFrom(
         this.productService
@@ -58,7 +60,9 @@ export class ProductClientService implements OnModuleInit {
     productId: string,
     quantity: number,
   ): Promise<DecrementStockResponse> {
-    const timeoutMs = this.config.get<number>('PRODUCT_GRPC_TIMEOUT_MS', 3000);
+    // Env từ ConfigMap luôn là STRING → phải ép về number. rxjs `timeout()` chỉ nhận number;
+    // truyền chuỗi "3000" nó tưởng là config object → "No timeout provided". `|| 3000` chặn cả NaN.
+    const timeoutMs = Number(this.config.get('PRODUCT_GRPC_TIMEOUT_MS', 3000)) || 3000;
     try {
       return await firstValueFrom(
         this.productService
@@ -84,7 +88,9 @@ export class ProductClientService implements OnModuleInit {
     productId: string,
     quantity: number,
   ): Promise<ReleaseStockResponse> {
-    const timeoutMs = this.config.get<number>('PRODUCT_GRPC_TIMEOUT_MS', 3000);
+    // Env từ ConfigMap luôn là STRING → phải ép về number. rxjs `timeout()` chỉ nhận number;
+    // truyền chuỗi "3000" nó tưởng là config object → "No timeout provided". `|| 3000` chặn cả NaN.
+    const timeoutMs = Number(this.config.get('PRODUCT_GRPC_TIMEOUT_MS', 3000)) || 3000;
     try {
       return await firstValueFrom(
         this.productService

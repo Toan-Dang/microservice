@@ -4,7 +4,12 @@
 # (<svc>.<namespace>.svc.cluster.local). Trong cùng namespace có thể viết tắt còn "<svc>:port",
 # nhưng ở đây ghi FQDN đầy đủ cho rõ ràng — và để thấy rõ điểm khác so với ECS.
 #
-# ⚠️ Điền REDIS_HOST thật (endpoint ElastiCache) trước khi apply.
+# 🛑 BẮT BUỘC: thay `REPLACE_ME` trong REDIS_URL (dòng dưới) bằng endpoint ElastiCache/Valkey thật
+# TRƯỚC KHI apply. Đây là giá trị DUY NHẤT phải sửa tay — create-secrets.sh (Secret) và
+# apply-manifests.sh (envsubst ${...}) đều KHÔNG đụng tới nó (REPLACE_ME không phải cú pháp ${...}).
+# Lấy endpoint: aws elasticache describe-replication-groups --region us-east-1 \
+#   --query 'ReplicationGroups[].NodeGroups[0].PrimaryEndpoint.Address' --output text
+# Quên thay → auth-service không nối được Redis (refresh token hỏng), nhưng pod vẫn "Running" nên rất dễ sót.
 apiVersion: v1
 kind: ConfigMap
 metadata:
