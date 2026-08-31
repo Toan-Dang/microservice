@@ -1,5 +1,9 @@
 # Cost Plan — 17 ngày, credit $158.38, ngân sách tiêu $130
 
+> ⛔ **LEGACY — KHÔNG DÙNG NỮA.** Đây là cost plan cho kế hoạch 1-EC2 cũ (ap-southeast-1, credit $130).
+> Kế hoạch hiện hành là ECS→EKS us-east-1, xem [`../common/COST_PLAN.md`](../common/COST_PLAN.md) và
+> [`../../note/next-plan.md`](../../note/next-plan.md).
+
 > Lập ngày 16/08/2026. Region tham chiếu: **ap-southeast-1 (Singapore)**.
 > Giá lấy từ bảng on-demand Linux tại thời điểm lập (kiểm chứng lại ở AWS Pricing Calculator trước khi bấm Launch).
 > Phạm vi: phần còn lại của Phase 1 (Day 5-7) + toàn bộ Phase 2.

@@ -85,13 +85,20 @@ kubectl get nodes
 
 # 4. Config + secret + workload
 kubectl apply -f infra/eks/manifests/00-namespace.yaml
-#    sửa REDIS_URL thật trong 01-configmap.yaml trước:
+# 🛑 BẮT BUỘC: thay REDIS_URL thật (giá trị DUY NHẤT phải sửa tay — không script nào tự thay):
+REDIS_HOST=$(aws elasticache describe-replication-groups --region us-east-1 \
+  --query 'ReplicationGroups[0].NodeGroups[0].PrimaryEndpoint.Address' --output text)
+sed -i '' "s#redis://REPLACE_ME[^:]*#redis://$REDIS_HOST#" infra/eks/manifests/01-configmap.yaml  # macOS; Linux bỏ ''
 kubectl apply -f infra/eks/manifests/01-configmap.yaml
 ./deploy/eks/create-secrets.sh                 # đọc Secrets Manager → kubectl create secret
 ./deploy/eks/apply-manifests.sh                # envsubst ${ACCOUNT_ID}/${TAG} rồi apply
 
 kubectl get pods -n ecommerce -w
 ```
+
+> ✅ **Verify gate ngay sau apply:** `kubectl get configmap app-config -n ecommerce -o yaml | grep REPLACE_ME`
+> (phải KHÔNG in gì) và `kubectl get deploy -n ecommerce` (đủ 5 READY, đặc biệt `notification-worker` —
+> nó không có Service nên hay bị quên). Quên thay REDIS → auth không nối Redis nhưng pod vẫn "Running", rất dễ sót.
 
 > Manifest để **placeholder** `${ACCOUNT_ID}` / `${AWS_REGION}` / `${TAG}` trong `image:`.
 > `kubectl apply -f` thẳng sẽ apply nguyên chuỗi placeholder → `ImagePullBackOff`.
@@ -103,12 +110,21 @@ kubectl get pods -n ecommerce -w
 helm repo add eks https://aws.github.io/eks-charts && helm repo update
 helm install aws-load-balancer-controller eks/aws-load-balancer-controller -n kube-system \
   --set clusterName=ecommerce \
+  --set region=us-east-1 \
+  --set vpcId=$(aws eks describe-cluster --name ecommerce --region us-east-1 \
+    --query 'cluster.resourcesVpcConfig.vpcId' --output text) \
   --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller
 
 kubectl apply -f infra/eks/manifests/21-ingress.yaml
 kubectl get ingress -n ecommerce -w        # chờ cột ADDRESS ra DNS của ALB (~2–3 phút)
 curl http://$(kubectl get ingress api-gateway -n ecommerce -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')/health
 ```
+
+> 🛑 **`--set region` + `--set vpcId` là BẮT BUỘC.** Thiếu → controller tự đi hỏi VPC ID qua IMDS,
+> mà pod thường không với tới IMDS (hop-limit=1) → `context deadline exceeded` → CrashLoopBackOff →
+> apply Ingress báo `no endpoints available for service "aws-load-balancer-webhook-service"`. Lỗi webhook
+> đó nghĩa là **pod controller chưa Ready**, KHÔNG phải `21-ingress.yaml` sai — soi
+> `kubectl logs -n kube-system deploy/aws-load-balancer-controller`, đừng sửa manifest.
 
 > `helm install` tự apply CRD (`TargetGroupBinding`), nhưng `helm upgrade` **thì không** —
 > nâng cấp controller về sau phải apply CRD tay từ repo `aws/eks-charts`.
@@ -135,7 +151,8 @@ ServiceAccount `aws-load-balancer-controller` đã được `cluster.yaml` tạo
 ## Ngày 9 — HPA + rolling update / rollback
 
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+# metrics-server đã là EKS addon (khai trong cluster.yaml / có sẵn ở đường Console) → KHÔNG apply upstream.
+kubectl get deploy metrics-server -n kube-system      # đã có sẵn; nếu thiếu: eksctl create addon --name metrics-server --cluster ecommerce
 kubectl top pods -n ecommerce                 # phải ra số; <unknown> thì HPA vô dụng
 kubectl apply -f infra/eks/manifests/30-hpa.yaml
 

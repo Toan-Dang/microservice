@@ -57,7 +57,7 @@ Sau đó test bằng curl register → login → gọi 1 route được bảo v�
 Scaffold services/product-service (gRPC, proto/product.proto), DB product_db.
 - Entity Product (id, name, price, stock).
 - Implement Create, FindOne, FindMany (phân trang), CheckStock (trả available/price/remaining).
-- Seed 5 sản phẩm mẫu khi khởi động nếu bảng rỗng.
+- Seed 5 sản phẩm mẫu khi khởi động, **idempotent theo `name`** (so key nghiệp vụ, KHÔNG phải "chỉ seed khi bảng rỗng"), không ghi đè dữ liệu đang có.
 
 api-gateway: thêm REST /products (GET list, GET :id, POST create — POST cần JwtAuthGuard) map sang gRPC.
 Cập nhật docker-compose đã có sẵn service product-service.
@@ -72,9 +72,11 @@ Chạy build + vài unit test cho CheckStock. Test qua curl.
 Scaffold services/order-service (gRPC proto/order.proto, DB order_db) và services/notification-worker (RMQ consumer).
 
 order-service:
-- CreateOrder: với mỗi item gọi product-service.CheckStock qua gRPC (SYNC). Nếu thiếu hàng -> lỗi.
-  Tính total, lưu Order (status PENDING), rồi PUBLISH event "order.created" lên RabbitMQ (RABBITMQ_URL)
-  với payload {orderId, userId, items, total, email}. Dùng exchange 'orders' (topic) routing key 'order.created'.
+- CreateOrder:
+  - Lượt 1 (SYNC): với mỗi item gọi product-service.CheckStock qua gRPC. Thiếu hàng -> lỗi. Chốt price từ CheckStock (không tin giá client).
+  - Lượt 2 (trừ kho THẬT): với mỗi item gọi product-service.DecrementStock — trừ ATOMIC ở SQL (UPDATE ... WHERE stock >= qty). CheckStock chỉ là snapshot, DecrementStock mới chặn race. Nếu 1 item hết hàng giữa chừng (affected=0) -> gọi ReleaseStock hoàn kho các item đã trừ (rollback kiểu saga) rồi báo lỗi.
+  - Tính total, lưu Order (status PENDING), rồi PUBLISH event "order.created" lên RabbitMQ (RABBITMQ_URL)
+    với payload {orderId, userId, items, total, email}. Dùng exchange 'orders' (topic) routing key 'order.created'.
 - FindOne, FindByUser.
 
 notification-worker:

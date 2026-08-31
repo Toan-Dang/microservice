@@ -1,5 +1,9 @@
 # CI/CD Setup — Ngày 6
 
+> ⛔ **LEGACY — KHÔNG DÙNG NỮA.** Kế hoạch đã pivot sang ECS Fargate → EKS
+> (xem [`../../note/next-plan.md`](../../note/next-plan.md) và [`../README.md`](../README.md)).
+> Route CI/CD hiện hành ở [`../CONSOLE_GUIDE.md`](../CONSOLE_GUIDE.md). File này giữ để tham chiếu lịch sử.
+
 Bạn dựng **cả hai** route để học và để CV có cả "GitHub Actions" lẫn "AWS CodePipeline/CodeBuild/CodeDeploy".
 
 ---
@@ -9,7 +13,7 @@ Bạn dựng **cả hai** route để học và để CV có cả "GitHub Action
 Luồng: push `main` → test 5 service (matrix) → build & push image lên ECR (OIDC, không cần access key) → SSH vào EC2 pull & restart.
 
 ### Bước làm
-1. Copy `cicd/github-actions/ci.yml` và `deploy.yml` vào `.github/workflows/` trong repo.
+1. Copy `cicd/github-actions/ci.yml` và `cicd/legacy-ec2/deploy-ec2.yml` vào `.github/workflows/` trong repo.
 2. **Tạo IAM role cho GitHub OIDC** (không lưu access key vào GitHub):
    - IAM → Identity providers → Add provider → OpenID Connect
      - Provider URL: `https://token.actions.githubusercontent.com`

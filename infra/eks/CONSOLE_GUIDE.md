@@ -355,7 +355,12 @@ kubectl get nodes                      # phải thấy 2 node Ready
 
 kubectl apply -f infra/eks/manifests/00-namespace.yaml
 
-# sửa REDIS_URL thành endpoint ElastiCache thật trước khi apply
+# 🛑 BƯỚC BẮT BUỘC, DỄ SÓT: điền endpoint ElastiCache/Valkey thật vào REDIS_URL.
+# Đây là giá trị DUY NHẤT phải sửa tay (không script nào tự thay). Lấy endpoint:
+REDIS_HOST=$(aws elasticache describe-replication-groups --region us-east-1 \
+  --query 'ReplicationGroups[0].NodeGroups[0].PrimaryEndpoint.Address' --output text)
+echo "REDIS_HOST=$REDIS_HOST"    # phải ra *.cache.amazonaws.com, KHÔNG được rỗng/None
+sed -i '' "s#redis://REPLACE_ME[^:]*#redis://$REDIS_HOST#" infra/eks/manifests/01-configmap.yaml  # macOS; Linux bỏ ''
 kubectl apply -f infra/eks/manifests/01-configmap.yaml
 
 ./deploy/eks/create-secrets.sh         # đọc Secrets Manager → tạo k8s Secret
@@ -363,6 +368,20 @@ kubectl apply -f infra/eks/manifests/01-configmap.yaml
 
 kubectl get pods -n ecommerce -w
 ```
+
+> ✅ **Verify gate — chạy ngay sau apply, bắt đúng 2 lỗi kinh điển của bước này:**
+> ```bash
+> # 1. Không còn placeholder Redis sót lại (phải KHÔNG in ra gì):
+> kubectl get configmap app-config -n ecommerce -o yaml | grep REPLACE_ME
+> # 2. Đủ 5 workload READY — đặc biệt notification-worker (consumer RabbitMQ, không có Service nên hay bị quên):
+> kubectl get deploy -n ecommerce      # cả 5 phải READY 1/1 (api-gateway 2/2)
+> ```
+> - `notification-worker` kẹt `0/1`, `describe` báo `FailedCreate: serviceaccount "notification-worker"
+>   not found` → manifest cũ trỏ một SA chỉ tồn tại ở đường `eksctl`. **Đã sửa:** manifest giờ dùng SA
+>   `default` (email đang mock, không cần IRSA). Nếu vẫn dính, `kubectl get deploy notification-worker
+>   -n ecommerce -o jsonpath='{.spec.template.spec.serviceAccountName}'` phải trả `default`.
+> - `grep REPLACE_ME` còn ra dòng → bạn quên bước `sed` ở trên; sửa rồi `kubectl apply` lại configmap và
+>   `kubectl rollout restart deploy/auth-service -n ecommerce` (env từ ConfigMap chỉ nạp lúc pod khởi động).
 
 > ⚠️ **Mọi manifest có `image:` đều để placeholder `${ACCOUNT_ID}/${AWS_REGION}/${TAG}`** — kể cả
 > `40-migration-job.yaml`. `kubectl apply -f` **thẳng** sẽ apply nguyên chuỗi `${...}`; vì `${}` là ký

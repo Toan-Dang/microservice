@@ -1,5 +1,9 @@
 # AWS Setup — Ngày 5 (Deploy 1 EC2, image ở ECR)
 
+> ⛔ **LEGACY — KHÔNG DÙNG NỮA.** Kế hoạch đã pivot sang ECS Fargate → EKS + stateful managed
+> (RDS/ElastiCache/Amazon MQ). Xem [`../../note/next-plan.md`](../../note/next-plan.md) và
+> [`../README.md`](../README.md). Region/ngân sách/kiến trúc dưới đây thuộc kế hoạch cũ, giữ để tham chiếu.
+
 > Mục tiêu: đưa hệ thống lên internet bằng **1 EC2 `t3.medium` (4 GB)**, image lưu ở **ECR**.
 > Không dùng RDS/ElastiCache/MQ/Fargate — tất cả chạy container trên chính EC2 để tiết kiệm tối đa.
 >

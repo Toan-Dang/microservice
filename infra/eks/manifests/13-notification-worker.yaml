@@ -13,9 +13,10 @@ spec:
     metadata:
       labels: { app: notification-worker }
     spec:
-      # ServiceAccount này gắn IRSA có quyền ses:SendEmail (khai trong cluster.yaml).
-      # IRSA = "task role" của k8s. Không cần access key trong pod.
-      serviceAccountName: notification-worker
+      # Email đang MOCK → worker không gọi AWS SDK → KHÔNG cần IRSA/ServiceAccount riêng,
+      # dùng SA `default` như 4 service kia (bỏ trống serviceAccountName).
+      # Khi nào gửi SES thật: tạo IRSA `notification-worker` (xem cluster.yaml, phần bị comment)
+      # rồi thêm lại dòng `serviceAccountName: notification-worker` ở đây.
       containers:
         - name: notification-worker
           image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/notification-worker:${TAG}
