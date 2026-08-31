@@ -1,9 +1,14 @@
-# E-commerce Microservices — Dự án 1 tuần (NestJS + Docker + AWS)
+# E-commerce Microservices — Dự án tự học (NestJS + Docker)
 
-> Dự án tự học microservice, thiết kế để **xong trong 7 ngày** với sự hỗ trợ của **Claude Code CLI**,
-> deploy lên **AWS chi phí thấp nhất có thể** (1 EC2, mọi thứ chạy container), có **CI/CD cả GitHub Actions lẫn AWS CodePipeline**.
+> Hệ **5 microservice NestJS chạy local bằng Docker Compose** — đây là phần chính: tách service,
+> giao tiếp **sync (gRPC) + async (RabbitMQ)**, service discovery, mỗi service một database.
+> Xây trong ~7 ngày với **Claude Code CLI** (bộ prompt sẵn ở [`PROMPTS.md`](PROMPTS.md)).
+>
+> **Deploy lên AWS là phần TÙY CHỌN** (để học orchestration): thang 2 bậc **ECS Fargate → EKS** với
+> stateful managed (RDS / ElastiCache / Amazon MQ) + CI/CD. Một nhánh **1-EC2 cũ** giữ ở `infra/legacy-ec2/`.
 
-**tách service, giao tiếp sync (gRPC) + async (RabbitMQ), chạy nhiều container, service discovery, và pipeline deploy multi-service**.
+> **🚀 Bắt đầu từ đâu:** chạy local theo [**mục 6 — Cách chạy local**](#6-cách-chạy-local).
+> Muốn deploy lên AWS thì mới cần [`infra/README.md`](infra/README.md).
 
 ---
 
@@ -14,9 +19,11 @@ service có ranh giới rõ ràng, và bắt buộc phải có cả giao tiếp 
 điểm bạn cần bổ sung. Đủ nhỏ để 1 người làm xong trong 1 tuần, nhưng đủ "thật" để nói được trong phỏng vấn.
 
 **Điểm nhấn để đưa vào CV sau khi hoàn thành:**
-> Designed and deployed an e-commerce microservices system (5 services) on AWS with NestJS, using gRPC for
-> synchronous inter-service communication and RabbitMQ for event-driven async workflows (order → payment →
-> notification). Containerized with Docker, deployed to EC2, with dual CI/CD pipelines (GitHub Actions + AWS CodePipeline/CodeDeploy).
+> Built an e-commerce microservices system (5 services, NestJS) using gRPC for synchronous inter-service
+> communication and RabbitMQ for event-driven async workflows (order → notification), with atomic stock
+> decrement and saga-style rollback. Containerized with Docker Compose; optionally deployed on AWS via a
+> two-tier path — ECS Fargate then EKS (Kubernetes) — with managed RDS/ElastiCache/Amazon MQ and CI/CD
+> (GitHub Actions OIDC + AWS CodePipeline).
 
 ---
 
@@ -25,7 +32,7 @@ service có ranh giới rõ ràng, và bắt buộc phải có cả giao tiếp 
 ```
                        ┌─────────────────────────────────────────────┐
    Client (HTTP/REST)  │                                             │
-        │              │              AWS EC2 (t3.micro)              │
+        │              │            Docker Compose (local)            │
         ▼              │                                             │
   ┌───────────┐        │   ┌──────────────┐                          │
   │ API Gateway│◄──────┼───│ api-gateway  │  REST inbound            │
@@ -57,6 +64,20 @@ service có ranh giới rõ ràng, và bắt buộc phải có cả giao tiếp 
                        └─────────────────────────────────────────────┘
 ```
 
+> Sơ đồ trên là **stack local** (`docker compose up`): 5 service + Postgres/Redis/RabbitMQ đều là container.
+> **Khi deploy lên AWS (tùy chọn)**, phần *stateless* chạy trên orchestrator, phần *stateful* tách ra managed:
+
+| Local (container) | Trên AWS (managed) |
+|---|---|
+| 5 service NestJS | **ECS Fargate** (bậc 1) → **EKS** (bậc 2) |
+| PostgreSQL | **RDS** (Postgres 16, 3 database) |
+| Redis | **ElastiCache** (Valkey) |
+| RabbitMQ | **Amazon MQ** (RabbitMQ) |
+
+> Vì sao tách stateful ra managed thay vì để trong orchestrator: orchestrator có thể giết & tạo lại container
+> bất cứ lúc nào → stateless bị giết thì vô hại, database bị giết thì mất data. Chi tiết + so sánh ECS↔EKS:
+> [`note/ecs-vs-eks.md`](note/ecs-vs-eks.md).
+
 ### Các service
 
 | Service | Vai trò | Giao tiếp | DB |
@@ -84,14 +105,20 @@ service có ranh giới rõ ràng, và bắt buộc phải có cả giao tiếp 
 
 ## 3. Tech stack
 
+**Core — chạy local (phần chính):**
 - **Ngôn ngữ/Framework:** TypeScript, NestJS (microservices package)
 - **Sync:** gRPC (`@nestjs/microservices` transport gRPC + protobuf)
 - **Async:** RabbitMQ (`amqplib` / NestJS RMQ transport)
-- **DB:** PostgreSQL (TypeORM/Prisma), Redis (cache + refresh token)
-- **Container:** Docker + docker-compose (multi-stage build)
-- **Cloud:** AWS EC2 (t3.micro), ECR (chứa image), SES (email, optional)
-- **CI/CD:** GitHub Actions (build/test/push ECR + SSH deploy) **và** AWS CodePipeline + CodeBuild + CodeDeploy
-- **Test:** Jest (unit + e2e) — bạn đã mạnh phần này, dùng để làm đầy pipeline
+- **DB:** PostgreSQL (TypeORM), Redis (cache + refresh token)
+- **Container:** Docker + Docker Compose (multi-stage build)
+- **Test:** Jest (unit + e2e)
+
+**Deploy lên AWS — tùy chọn (chỉ khi muốn học orchestration):**
+- **Bậc 1 — ECS Fargate**; **Bậc 2 — EKS** (Kubernetes: eksctl / kubectl / helm)
+- **Stateful managed:** RDS (Postgres), ElastiCache (Valkey), Amazon MQ (RabbitMQ)
+- **Khác:** ECR (image), Secrets Manager, SES (email, optional)
+- **CI/CD:** GitHub Actions (OIDC → ECR → ECS/EKS) **và** AWS CodePipeline + CodeBuild
+- **Legacy:** nhánh 1-EC2 + docker-compose ở `infra/legacy-ec2/` (giữ tham chiếu)
 
 ---
 
@@ -132,16 +159,20 @@ Mỗi ngày ~3-5 giờ. Cột "Prompt" trỏ tới bộ prompt sẵn trong `PROM
 - **Mục tiêu:** đặt hàng → thấy event chạy qua queue → worker nhận & xử lý.
 - **Prompt:** `PROMPTS.md` → Day 4
 
-### Ngày 5+ — Deploy lên AWS ⚠️ ĐÃ PIVOT
+### Ngày 5+ — Deploy lên AWS (TÙY CHỌN — để học orchestration)
 
-> Kế hoạch cũ (1 EC2 + `docker-compose`) **đã thay** bằng **ECS Fargate → EKS**.
-> Kế hoạch mới: [`note/next-plan.md`](note/next-plan.md). Bản cũ giữ ở `infra/legacy-ec2/`.
->
-> Lý do: budget không còn là ràng buộc ($190/15 ngày), mục tiêu chuyển sang học-để-phỏng-vấn
-> → deploy bằng orchestrator (thứ ngành thực sự dùng), không phải `docker-compose` trên 1 EC2.
+> Sau Ngày 4, local đã là một hệ microservice **chạy được hoàn chỉnh** — đủ để học và demo.
+> Phần deploy dưới đây **không bắt buộc**, dành cho ai muốn học đưa hệ lên cloud thật.
+> Toàn bộ chi tiết + thứ tự làm ở [`infra/README.md`](infra/README.md).
 
-Mỗi bậc có **2 bản hướng dẫn**: `CONSOLE_GUIDE.md` (bấm chuột, dùng khi học lần đầu) và
-script CLI (dựng lại nhanh / cắm vào CI/CD).
+Có **hai nhánh deploy** (chọn 1, hoặc làm nhánh hiện hành để học nhiều nhất):
+
+- **Nhánh hiện hành — ECS Fargate → EKS** (khuyến nghị): thang 2 bậc, cùng một hệ, hai orchestrator;
+  stateful đẩy ra managed (RDS/ElastiCache/Amazon MQ). Kế hoạch chi tiết: [`note/next-plan.md`](note/next-plan.md).
+- **Nhánh legacy — 1 EC2 + docker-compose**: đơn giản/rẻ nhất, giữ ở [`infra/legacy-ec2/`](infra/legacy-ec2/) để tham chiếu.
+
+Mỗi phần có **2 bản hướng dẫn**: `CONSOLE_GUIDE.md` (bấm chuột, học lần đầu) và script/manifest CLI
+(dựng lại nhanh / cắm vào CI/CD).
 
 | Ngày | Việc | Hướng dẫn |
 |---|---|---|
