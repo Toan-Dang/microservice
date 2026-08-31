@@ -85,6 +85,9 @@ addons:
   - name: coredns          # DNS nội bộ: <svc>.<ns>.svc.cluster.local — thay Cloud Map của bậc 1
   - name: kube-proxy
   - name: aws-ebs-csi-driver   # cần cho bài bonus StatefulSet + PVC (Ngày 11)
+  - name: metrics-server       # cho HPA (Ngày 9). Khai làm addon để KHỚP đường Console (vốn đã có
+                               # sẵn). ĐỪNG `kubectl apply` bản upstream từ GitHub — sẽ đè lên addon,
+                               # thêm k8s-app vào Service selector → 0 endpoint → `kubectl top` chết.
 
 cloudWatch:
   clusterLogging:
