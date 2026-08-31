@@ -63,7 +63,8 @@ Phỏng vấn hỏi "bạn deploy thế nào" thì câu trả lời tốt là m�
 3. CI/CD cho ECS → [`../cicd/README.md`](../cicd/README.md)
 4. `eks/README.md` → dựng lại chính hệ đó trên Kubernetes (🟡 stretch giá trị cao)
 
-Chi phí & teardown: [`common/COST_PLAN.md`](./common/COST_PLAN.md) — **đọc trước khi bấm Create bất cứ thứ gì.**
+Chi phí: [`common/COST_PLAN.md`](./common/COST_PLAN.md) — **đọc trước khi bấm Create bất cứ thứ gì.**
+Xoá sạch an toàn (đúng thứ tự, không sót ALB/EIP mồ côi): [**`TEARDOWN.md`**](./TEARDOWN.md).
 
 ## File dùng chung không nằm trong common/
 
