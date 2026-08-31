@@ -3,10 +3,14 @@
 > **Bản bấm chuột.** Bản CLI tương ứng: [`cluster.yaml`](./cluster.yaml) + `eksctl`,
 > [`allow-nodes-to-data.sh`](./allow-nodes-to-data.sh).
 
-> **Trạng thái đối chiếu (18/08/2026).**
-> ✅ Tạo cluster (wizard 6 trang, `Support type`, `Bootstrap cluster administrator access`),
-> tạo managed node group (4 trang) — **đã đối chiếu** với docs AWS và đã sửa lại.
-> ⚠️ Tag subnet, access entry, add-on — dựa trên docs nhưng chưa đối chiếu từng nhãn màn hình.
+> **Trạng thái đối chiếu (26/08/2026).**
+> ✅ Tạo cluster (Configuration options + wizard 6 trang, `Support type`, `Cluster access`),
+> node group (4 trang, đủ field label), **access entry (wizard 3 trang)**, **OIDC provider (không có
+> nút trong EKS Console — làm ở IAM hoặc eksctl)**, lịch version 1.34/1.35/1.36 — **đã đối chiếu** docs AWS.
+> ✅ **Kiểm chứng bằng lỗi thật trên account:** Free Tier plan chặn t3.medium (`CREATE_FAILED`) → bảng
+> instance free-tier x86_64 thay thế ở Bước 3; migration job phải qua `apply-manifests.sh` (envsubst),
+> `kubectl apply -f` thẳng → `InvalidImageName`, đã sửa Bước 5.
+> ⚠️ Tag subnet, IAM role use-case label — dựa trên docs nhưng chưa soi từng nhãn màn hình.
 
 ## Đọc trước: EKS **không** làm hết bằng Console được
 
@@ -27,7 +31,31 @@ Và đây chính là bài học của bậc 2: ở ECS mọi thứ là AWS API n
 
 ---
 
-## Bước 0 — Cài 2 công cụ trên máy
+## Bước 0 — Cài công cụ trên máy
+
+**macOS (Homebrew) — cách gọn nhất, tự đúng cả Intel lẫn Apple Silicon:**
+
+```bash
+# kubectl + helm (thao tác cluster) — cộng aws/jq/gettext cho các script deploy ở bước 5–6
+brew install kubectl helm awscli jq gettext
+kubectl version --client && helm version && aws --version && jq --version && envsubst --version | head -1
+```
+
+> ⚠️ **macOS KHÔNG có sẵn `envsubst`, `aws`, `jq`** — thiếu là chặn đúng các script bạn sẽ chạy:
+> - `apply-manifests.sh` (bước 5–6) gọi **`envsubst`** để thay `${ACCOUNT_ID}/${AWS_REGION}/${TAG}`;
+>   `envsubst` nằm trong gói **`gettext`** (không phải `envsubst`). Thiếu → script thoát ngay
+>   *"Thiếu envsubst (gói gettext)"*, còn `kubectl apply -f` thẳng thì pod `InvalidImageName`.
+> - `create-secrets.sh` (bước 5) cần **`aws`** (đọc Secrets Manager) + **`jq`** (parse JSON).
+>
+> `gettext` là **keg-only** trên macOS nhưng Homebrew vẫn symlink riêng binary `envsubst` vào
+> `/opt/homebrew/bin` (Apple Silicon) / `/usr/local/bin` (Intel), nên gõ `envsubst` là chạy được luôn,
+> không cần `brew link`. Kiểm chứng bằng dòng `envsubst --version` ở trên.
+
+> 💡 Các script deploy để `#!/usr/bin/env bash`. macOS mặc định là **zsh** và kèm **bash 3.2** (cũ),
+> nhưng script chỉ dùng array thường + process substitution — chạy tốt trên bash 3.2, không cần
+> nâng bash. Cứ chạy `./deploy/eks/*.sh` bình thường.
+
+**Linux:**
 
 ```bash
 # kubectl
@@ -38,8 +66,12 @@ sudo install -m 0755 kubectl /usr/local/bin/kubectl && kubectl version --client
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 ```
 
-`eksctl` **không bắt buộc** nếu bạn tạo cluster bằng Console — nhưng nó gộp ~10 bước bấm thành
-1 lệnh. Bản CLI ở [`cluster.yaml`](./cluster.yaml).
+> ⚠️ Bản `curl` ở trên là **binary `linux/amd64`** — chạy trên macOS sẽ tải nhầm kiến trúc
+> (macOS cần `darwin/arm64` hoặc `darwin/amd64`). Trên macOS luôn dùng `brew` để khỏi chọn tay.
+
+`eksctl` **không bắt buộc** để *tạo cluster* bằng Console — nhưng **Bước 6 (IRSA + OIDC provider)
+lại cần nó**, nên cài luôn cho đỡ quay lại: `brew install eksctl` (macOS). Nó cũng gộp ~10 bước bấm
+tạo cluster thành 1 lệnh — bản CLI ở [`cluster.yaml`](./cluster.yaml).
 
 ---
 
@@ -74,9 +106,11 @@ Console **không** tự tạo 2 role này; trình tạo cluster sẽ bắt bạn
 
 **Console → Elastic Kubernetes Service → Clusters → `Add cluster` → `Create`**
 
-Wizard có 6 trang. Điền như sau:
+Đầu tiên là **màn chọn Configuration options**, sau đó là **wizard 6 trang** (Configure cluster →
+Specify networking → Configure observability → Select add-ons → Configure selected add-ons settings →
+Review and create). Điền như sau:
 
-**Trang đầu — Configuration options**
+**Màn chọn đầu — Configuration options**
 
 | Trường | Chọn | Vì sao |
 |---|---|---|
@@ -93,8 +127,8 @@ Wizard có 6 trang. Điền như sau:
 | **Support type** ⚠️ | **Standard support** | **đây là cái chốt tiền** — xem dưới |
 | Secrets encryption | tắt | |
 | ARC Zonal shift | tắt | |
-| **Cluster access** → Bootstrap cluster administrator access | **để nguyên (bật)** | người tạo cluster **tự động** là Kubernetes admin |
-| **Cluster access** → Cluster authentication mode | **EKS API and ConfigMap** | dùng được cả access entry (mới) lẫn `aws-auth` (cũ) |
+| section **Cluster access** → Bootstrap cluster administrator access | radio **Allow cluster administrator access** (mặc định — để nguyên) | người tạo cluster **tự động** là Kubernetes admin |
+| section **Cluster access** → Cluster authentication mode | **EKS API and ConfigMap** | dùng được cả access entry (mới) lẫn `aws-auth` (cũ) |
 
 **Trang `Specify networking`**
 
@@ -153,7 +187,7 @@ Cluster `Active` → mở cluster → tab **Compute** → **Add node group**. Wi
 |---|---|
 | AMI type | **Amazon Linux 2023 (x86_64)** |
 | Capacity type | **On-Demand** |
-| Instance types | **t3.medium** |
+| Instance types | **t3.medium** (nếu account bị Free Tier plan chặn → xem cảnh báo dưới) |
 | Disk size | 20 GiB |
 | **Desired size / Minimum size / Maximum size** | **2 / 0 / 3** |
 | Node group update configuration | mặc định |
@@ -178,6 +212,28 @@ Cluster `Active` → mở cluster → tab **Compute** → **Add node group**. Wi
 > ⚠️ **x86_64, không phải Graviton (`t4g`)** — image trên ECR build cho `linux/amd64`.
 > Chọn nhầm t4g thì pod chết với `exec format error`.
 >
+> 🛑 **Bẫy "Free Tier plan" (tài khoản mới, từ ~2025):** node group sẽ vào `CREATE_FAILED` với
+> `AsgInstanceLaunchFailures` — *"The specified instance type is not eligible for Free Tier"*.
+> `kubectl get nodes` khi đó trả **"No resources found"** (control plane vẫn `ACTIVE`, chỉ là 0 node
+> join). Nguyên nhân: account đang ở **Free plan**, chặn launch mọi instance không free-tier.
+> `CREATE_FAILED` **không sửa bằng Edit** — phải `aws eks delete-nodegroup ... && aws eks wait
+> nodegroup-deleted ...` rồi tạo lại.
+>
+> **2 hướng xử lý:**
+> - **Nâng account lên Paid plan** (Billing → Account/Free Tier → *Upgrade to paid plan*) rồi tạo lại với `t3.medium`.
+> - **Hoặc giữ Free plan, chọn instance free-tier-eligible + đủ RAM.** Xem account cho phép gì:
+>   `aws ec2 describe-instance-types --region us-east-1 --filters Name=free-tier-eligible,Values=true --query 'InstanceTypes[].InstanceType'`
+>
+> | Instance | RAM | Arch | Dùng thay t3.medium? |
+> |---|---|---|---|
+> | `c7i-flex.large` | 4 GB | x86_64 | ✅ tốt nhất — bằng RAM t3.medium |
+> | `m7i-flex.large` | 8 GB | x86_64 | ✅ dư sức |
+> | `t3.small` | 2 GB | x86_64 | ⚠️ chật |
+> | `t3.micro` | 1 GB | x86_64 | ❌ quá yếu (≤4 pod IP/node, không đủ CoreDNS + app) |
+> | `t4g.*` | — | **arm64** | ❌ Graviton → `exec format error` |
+>
+> Danh sách free-tier-eligible **khác nhau tuỳ account/region** — luôn chạy lệnh trên để lấy đúng của bạn.
+>
 > ⚠️ Tài liệu EKS nói thẳng: *"If you choose a public subnet, and your cluster has only the public
 > API server endpoint enabled, then the subnet must have `MapPublicIPOnLaunch` set to `true` for the
 > instances to successfully join a cluster."* — đúng cái bẫy ở bước 4c. Subnet của default VPC bật sẵn.
@@ -196,20 +252,54 @@ cài mặc định khi tạo cluster. Nếu bước 2 bạn chưa thêm **Amazon
 
 ### 4b. Quyền xem Resources trong Console
 
-**Bạn thường KHÔNG phải làm gì.** Ở trang `Configure cluster`, mục **Bootstrap cluster administrator
-access** để bật (mặc định) nghĩa là **principal tạo cluster tự động là Kubernetes admin** — mở tab
-**Resources** là xem được ngay.
+**Bạn thường KHÔNG phải làm gì.** Kéo xuống cuối trang `Configure cluster`, có section **Cluster
+access**. Trong đó mục **Bootstrap cluster administrator access** là **2 radio** (không phải toggle
+bật/tắt):
 
-Chỉ cần làm bước dưới khi bạn xem cluster bằng **user/role khác** với lúc tạo (ví dụ tạo bằng
-`eksctl` với profile A, xem Console bằng SSO user B), hoặc khi bạn đã tắt bootstrap access:
+- **Allow cluster administrator access** ← **mặc định đã chọn sẵn**
+- Disallow cluster administrator access
 
-Cluster → tab **Access** → **Create access entry**
+Để nguyên lựa chọn mặc định nghĩa là **principal tạo cluster tự động là Kubernetes admin** — vào
+cluster, mở tab **Resources** là **xem được ngay các object Kubernetes bên trong cluster**:
+Workloads (Deployment / Pod / ReplicaSet / Job), Service & networking (Service / Ingress), Config &
+secrets... mà không phải làm gì thêm. (`Cluster authentication mode` cũng nằm ngay trong section này.)
+
+> 🛑 **DỪNG nếu bạn đăng nhập bằng CHÍNH tài khoản tạo cluster.** Bootstrap access đã tự tạo sẵn
+> access entry cho bạn — **không cần và không thể tạo thêm**. Nếu cứ bấm Create access entry cho
+> đúng principal đó, Console báo *"The specified access entry resource is already in use on this
+> cluster."* Đây **không phải lỗi** — nó xác nhận bạn đã có quyền. Cứ mở thẳng tab **Resources**.
+> (Muốn kiểm chứng: tab **Access** sẽ liệt kê sẵn một access entry ứng với principal của bạn.)
+
+Chỉ làm bước dưới khi bạn xem cluster bằng **user/role KHÁC** với lúc tạo (ví dụ tạo bằng
+`eksctl` với profile A, xem Console bằng SSO user B), hoặc khi bạn đã chọn *Disallow cluster
+administrator access* lúc tạo:
+
+Cluster → tab **Access** → **Create access entry**. Đây là **wizard 3 trang**, không phải 1 form:
+
+**Trang 1 — Configure access entry**
 
 | Trường | Chọn |
 |---|---|
-| IAM principal ARN | user/role đang đăng nhập Console |
-| Type | Standard |
-| Access policy | `AmazonEKSClusterAdminPolicy`, scope **Cluster** |
+| **IAM principal** | dropdown chọn **role/user có sẵn** đang đăng nhập Console (không còn gõ tay ARN) |
+| Type | **Standard** (mặc định — để nguyên) |
+| Username / Groups / Tags | bỏ trống (dùng access policy ở trang sau, không cần RBAC group thủ công) |
+
+→ **Next**.
+
+**Trang 2 — Add access policy** — bấm **Add policy**, rồi:
+
+| Trường | Chọn |
+|---|---|
+| Policy name | `AmazonEKSClusterAdminPolicy` |
+| Access scope | **Cluster** |
+
+→ **Next**.
+
+**Trang 3 — Review and create** → **Create**.
+
+> ⚠️ Dễ vấp: nếu ở trang 2 **không bấm `Add policy`** mà Next luôn, access entry vẫn tạo được
+> nhưng principal **không có quyền gì** — tab Resources vẫn báo lỗi y như chưa làm. Type Standard mà
+> bỏ trống cả Groups lẫn access policy = tạo entry rỗng.
 
 > Triệu chứng khi thiếu: tab **Resources** báo *"Your current IAM principal doesn't have access
 > to Kubernetes objects on this cluster"*. Bài học vẫn giữ nguyên giá trị: quyền AWS (IAM) và quyền
@@ -217,7 +307,11 @@ Cluster → tab **Access** → **Create access entry**
 
 ### 4c. Tag subnet (BẮT BUỘC — Console không tự làm)
 
-**EC2 → Subnets** → chọn từng subnet đã dùng cho cluster → tab **Tags** → **Manage tags**:
+**Trước hết, biết subnet nào là của cluster:** EKS → cluster `ecommerce` → tab **Networking** → mục
+**Subnets** liệt kê các `subnet-xxxx` cluster đang dùng. Copy các ID đó.
+
+Rồi **VPC → Subnets** (service **VPC**, không phải EC2) → lọc/tìm theo đúng các ID vừa copy → chọn
+từng subnet → tab **Tags** → **Manage tags**:
 
 | Key | Value |
 |---|---|
@@ -270,17 +364,26 @@ kubectl apply -f infra/eks/manifests/01-configmap.yaml
 kubectl get pods -n ecommerce -w
 ```
 
-> Manifest để placeholder `${ACCOUNT_ID}` trong `image:`. `kubectl apply -f` thẳng sẽ apply
-> nguyên chuỗi đó → `ImagePullBackOff`. Dùng `apply-manifests.sh`, hoặc mở file thay tay.
+> ⚠️ **Mọi manifest có `image:` đều để placeholder `${ACCOUNT_ID}/${AWS_REGION}/${TAG}`** — kể cả
+> `40-migration-job.yaml`. `kubectl apply -f` **thẳng** sẽ apply nguyên chuỗi `${...}`; vì `${}` là ký
+> tự **không hợp lệ** trong image ref, pod chết ngay với **`InvalidImageName`** (KHÔNG phải
+> `ImagePullBackOff` — cái đó là khi tên image hợp lệ nhưng kéo không được). **Luôn đi qua
+> `apply-manifests.sh`** (nó `envsubst` hộ), kể cả cho file chạy riêng — truyền tên file làm tham số.
 
-Chạy migration (tương đương one-off task của bậc 1):
+Chạy migration (tương đương one-off task của bậc 1). `40-migration-job.yaml` **không** nằm trong
+danh sách mặc định của `apply-manifests.sh` (nó là job chạy-một-lần), nên **truyền thẳng tên file**
+vào script để vẫn được thay placeholder:
 
 ```bash
-kubectl apply -f infra/eks/manifests/40-migration-job.yaml
+# ĐÚNG: qua script (envsubst) — KHÔNG dùng `kubectl apply -f` thẳng file này
+TAG=<git-sha> ./deploy/eks/apply-manifests.sh infra/eks/manifests/40-migration-job.yaml
 kubectl logs -f job/migrate-auth -n ecommerce
 # chạy lại phải xoá job cũ trước — Job là immutable:
 # kubectl delete job migrate-auth migrate-product migrate-order -n ecommerce
 ```
+
+> `TAG` mặc định = `git rev-parse --short HEAD`; chỉ cần set tay nếu image trên ECR gắn tag khác
+> commit đang checkout. `ACCOUNT_ID` script tự lấy qua `aws sts`, `AWS_REGION` mặc định `us-east-1`.
 
 **Quay lại Console để xem kết quả:** cluster → tab **Resources** → chọn namespace `ecommerce`
 → **Workloads → Deployments / Pods**. Bấm vào pod xem Events và Logs — dễ đọc hơn `kubectl describe`
@@ -299,9 +402,17 @@ aws iam create-policy --policy-name AWSLoadBalancerControllerIAMPolicy \
   --policy-document file://iam_policy.json
 ```
 
-**2. Bật OIDC provider cho cluster** (Console): cluster → tab **Overview** → mục
-**OpenID Connect provider URL** → nút **Associate IAM OIDC provider** (nếu chưa có).
-Hoặc: `eksctl utils associate-iam-oidc-provider --cluster ecommerce --approve`.
+**2. Tạo IAM OIDC provider cho cluster.** ⚠️ **EKS Console KHÔNG có nút "Associate IAM OIDC
+provider".** Tab **Overview** của cluster chỉ *hiển thị* giá trị **OpenID Connect provider URL** để
+bạn copy, chứ không tạo hộ. Có 2 đường tạo thật:
+
+- **Cách nhanh (khuyến nghị) — `eksctl` lo trọn gói:**
+  ```bash
+  eksctl utils associate-iam-oidc-provider --cluster ecommerce --region us-east-1 --approve
+  ```
+- **Cách bằng Console — làm ở IAM, không phải EKS:** copy OIDC URL ở tab Overview → mở **IAM
+  Console → Identity providers → Add provider** → Provider type **OpenID Connect** → dán URL vào
+  **Provider URL** → **Audience** = `sts.amazonaws.com` → **Add provider**.
 
 ```bash
 # 3. ServiceAccount + IRSA
@@ -314,12 +425,39 @@ eksctl create iamserviceaccount --cluster ecommerce --region us-east-1 \
 helm repo add eks https://aws.github.io/eks-charts && helm repo update
 helm install aws-load-balancer-controller eks/aws-load-balancer-controller -n kube-system \
   --set clusterName=ecommerce \
+  --set region=us-east-1 \
+  --set vpcId=vpc-xxxxxxxx \                # ⚠️ VPC của cluster — xem cảnh báo dưới
   --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller
 
 # 5. Ingress
 kubectl apply -f infra/eks/manifests/21-ingress.yaml
 kubectl get ingress -n ecommerce -w        # chờ cột ADDRESS ra DNS (~2–3 phút)
 ```
+
+> 🛑 **BẮT BUỘC truyền `--set region` + `--set vpcId`, nếu không controller sẽ CrashLoopBackOff.**
+> Không có 2 flag này, controller phải tự đi hỏi **EC2 instance metadata (IMDS)** để lấy VPC ID.
+> Trên EKS, pod thường **không với tới IMDS** (IMDSv2 mặc định `hop-limit=1`, mà gói tin từ pod cần
+> thêm 1 hop nữa) → log báo `failed to get VPC ID ... context deadline exceeded` → pod chết.
+> Lấy VPC ID của cluster:
+> ```bash
+> aws eks describe-cluster --name ecommerce --region us-east-1 \
+>   --query 'cluster.resourcesVpcConfig.vpcId' --output text
+> ```
+> Nếu đã lỡ `helm install` thiếu 2 flag, không cần gỡ — vá bằng:
+> ```bash
+> helm upgrade aws-load-balancer-controller eks/aws-load-balancer-controller -n kube-system \
+>   --reuse-values --set region=us-east-1 --set vpcId=vpc-xxxxxxxx
+> ```
+
+> ⚠️ **Lỗi khi apply Ingress: `no endpoints available for service "aws-load-balancer-webhook-service"`.**
+> Đây **không phải** file `21-ingress.yaml` sai. Ingress mới đi qua một *validating webhook* do
+> controller phục vụ; báo "no endpoints" nghĩa là **pod controller đứng sau webhook đó chưa Ready**
+> (thường là CrashLoopBackOff vì lỗi IMDS ở trên). Phản xạ đúng — soi pod, **đừng sửa manifest**:
+> ```bash
+> kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+> kubectl logs  -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=40
+> ```
+> Controller Ready (`1/1`) → webhook có endpoint → apply lại Ingress là được.
 
 Sau đó **EC2 → Load Balancers** trong Console sẽ thấy một ALB **mới xuất hiện mà bạn không hề bấm
 Create**. Đối chiếu với bậc 1 (bạn tự tạo ALB tay ở bước 5) — đây chính là khác biệt
@@ -335,12 +473,45 @@ mồ côi, vẫn tính $0.55/ngày và không có gì tự dọn.
 
 ## Bước 7 — HPA (Ngày 9)
 
+HPA cần **metrics-server**. **KIỂM TRA nó có sẵn chưa TRƯỚC KHI cài** — cluster này đã bật
+`metrics-server` dưới dạng **EKS managed add-on** (chọn ở Bước 2/4a), nên **không cài lại bằng YAML**:
+
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+# 1. Có metrics-server chưa? (EKS add-on hoặc đã cài trước đó)
+aws eks list-addons --cluster-name ecommerce --region us-east-1 | grep metrics-server
+kubectl get deploy metrics-server -n kube-system
+
+# 2a. NẾU đã có (như cluster này) → BỎ QUA việc cài, đo luôn:
 kubectl top pods -n ecommerce            # ra số ⇒ OK; "unknown" ⇒ HPA sẽ vô dụng
+
+# 2b. CHỈ khi thật sự chưa có metrics-server ở đâu cả mới cài bản upstream:
+# kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
 kubectl apply -f infra/eks/manifests/30-hpa.yaml
 kubectl get hpa -n ecommerce
 ```
+
+> 🛑 **KHÔNG `kubectl apply` bản upstream đè lên metrics-server đã có (nhất là bản EKS add-on).**
+> Bản upstream và bản EKS có **labels/selector khác nhau**, nên apply đè sẽ hỏng nửa vời:
+> - Deployment fail: `spec.selector: field is immutable` + `Duplicate value "https"` (selector của
+>   Deployment không sửa được sau khi tạo).
+> - Nguy hiểm hơn: nó **patch được** Service — thêm `k8s-app` vào selector mà pod EKS không có label
+>   đó → Service khớp **0 pod** → `endpoints <none>` → APIService `v1beta1.metrics.k8s.io` thành
+>   `MissingEndpoints` → **`kubectl top` báo `Metrics API not available`**. Trông như metrics-server
+>   chết, thực ra chỉ là Service trỏ sai.
+>
+> **Sửa (khôi phục add-on về config chuẩn của EKS, dọn luôn các resource bị đè):**
+> ```bash
+> aws eks update-addon --cluster-name ecommerce --addon-name metrics-server \
+>   --region us-east-1 --resolve-conflicts OVERWRITE
+> # chờ ACTIVE rồi kiểm chứng:
+> aws eks describe-addon --cluster-name ecommerce --addon-name metrics-server \
+>   --region us-east-1 --query 'addon.status' --output text
+> kubectl get apiservice v1beta1.metrics.k8s.io   # AVAILABLE phải = True
+> kubectl top pods -n ecommerce
+> ```
+> Muốn **nâng version** metrics-server thì đi qua add-on (`aws eks update-addon --addon-version ...`),
+> **không** apply YAML tay.
 
 Cột `TARGETS` hiện `<unknown>/70%` = metrics-server chưa chạy, **hoặc** Deployment thiếu
 `resources.requests.cpu` (HPA tính % theo requests, không theo limits, không theo node).
